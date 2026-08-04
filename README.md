@@ -31,6 +31,23 @@ partial waveform in this panel's OTP. The newer tri-colour SKUs that do support 
 not. Overriding OTP with a custom LUT via `0x32` is the only remaining route and
 is untested speculation.
 
+A sweep of every plausible `0x22` value confirms there is exactly ONE real display
+mode in this panel's OTP. Do not re-run this:
+
+| `0x22` | Measured | Verdict |
+|---|---|---|
+| `0xF7` | 24,587 ms | the real full refresh (what we use) |
+| `0xF4` | 24,459 ms | same waveform without the power-down bits — no faster, leaves the analog rail on |
+| `0xFC` | 175 ms | no-op, nothing on the glass (confirmed visually) |
+| `0xFF` | 316 ms | no-op (Mode 2 waveform slot is empty) |
+| `0xC7` | 314 ms | no-op (no LUT load) |
+
+Anything under ~400 ms means the controller powered up, found no usable waveform
+and released BUSY without driving the panel. The ~20 s of that 24.5 s that looks
+"wasted" after the first clean-looking pass is the red phase plus the settling
+passes — cutting it short looks fine for a minute, then fades and accumulates
+ghosting.
+
 A per-minute clock would therefore have the screen mid-flash roughly a third of
 the time and would wear the panel out. At 5 minutes the duty cycle is ~6%. The
 time is shown rounded down to the boundary, and the paint is *started* early
@@ -141,6 +158,8 @@ were *inferred* from GxEPD2 rather than read from a datasheet, and now are not.
 | 4 · geometry | **122×250 confirmed** — the 128×296 fallback was not needed |
 | 5 · rotation | `rotation=3` (Landscape270) correct first try ✓ |
 | 6 · red plane | `invert_red=0` correct — red renders red ✓ |
+| 8 · integration | weather HTTP 200 over TLS (CMN bundle is sufficient); OTA into `ota_1` ✓ |
+| 9 · cadence | paints at 09:10 / 09:15 / 09:20, each completing 1-2 s before its boundary ✓ |
 
 That also validates the three SSD1680 init bytes taken from GxEPD2 (`0x3C`=0x05,
 `0x21` byte B=0x80, `0x22`=0xF7) and the `0x4E`/`0x4F` counter re-home between the
