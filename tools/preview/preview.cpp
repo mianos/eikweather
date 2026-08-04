@@ -1,16 +1,16 @@
 // Host-side layout preview. Compiles Layout.cpp / Gfx.cpp / fonts.cpp with clang
-// and renders to PBM + PNG-ish PPM, so the entire layout can be settled without
-// touching the hardware. A panel refresh costs ~30 s; this costs 0.2 s.
+// and renders to PPM, so the entire layout can be settled without touching the
+// hardware. A panel refresh costs ~25 s; this costs 0.2 s.
 //
-//   make && ./preview && open out-*.ppm
+//   make run && open out-*.ppm
 //
-// It also prints the width budget for every string it draws, which is the whole
-// point: the layout constants in Layout.cpp are checked against MEASURED font
-// metrics rather than estimates.
+// It also asserts every width and vertical budget, which is the whole point: the
+// layout constants in Layout.cpp are checked against MEASURED font metrics rather
+// than estimates. This is what caught a descender being clipped off the bottom
+// edge in the previous layout.
 
 #include <cstdio>
 #include <cstring>
-#include <string>
 #include <vector>
 
 #include "Canvas.h"
@@ -25,14 +25,16 @@ constexpr int kH = 122;
 
 // These must track the constants in Layout.cpp. Duplicated deliberately rather
 // than exported: they are layout policy, and the preview's job is to prove the
-// chosen numbers are safe. If you change one here, change it there.
-constexpr int kLeftMaxW = 164;
-constexpr int kClockBaseline = 70;
-constexpr int kDateBaseline = 96;
-constexpr int kCondBaseline = 117;
-constexpr int kTempBaseline = 114;
+// chosen numbers are safe. Change one here, change it there.
+constexpr int kTempRightX = 232;
+constexpr int kLabelMaxW = 70;
+constexpr int kFcMaxW = 246;
+constexpr int kInsideLabelBaseline = 20;
+constexpr int kInsideTempBaseline = 43;
+constexpr int kOutsideLabelBaseline = 65;
+constexpr int kOutsideTempBaseline = 88;
+constexpr int kFcBaseline = 116;
 
-// Byte-per-pixel Canvas, matching the panel's logical landscape orientation.
 class MemCanvas final : public epd::Canvas {
  public:
   MemCanvas() { clear(); }
@@ -47,12 +49,10 @@ class MemCanvas final : public epd::Canvas {
   void writePpm(const char* path) const {
     FILE* f = fopen(path, "wb");
     if (!f) { perror(path); return; }
-    // 3x nearest-neighbour upscale — 250x122 is uncomfortably small on a Retina
-    // display and stroke problems hide at 1x.
-    constexpr int S = 3;
+    constexpr int S = 3;  // 250x122 is tiny on a Retina display; problems hide at 1x
     fprintf(f, "P6\n%d %d\n255\n", kW * S, kH * S);
-    for (int y = 0; y < kH; ++y) {
-      for (int s = 0; s < S; ++s) {
+    for (int y = 0; y < kH; ++y)
+      for (int s = 0; s < S; ++s)
         for (int x = 0; x < kW; ++x) {
           uint8_t r, g, b;
           switch (static_cast<epd::Color>(px_[static_cast<size_t>(y) * kW + x])) {
@@ -62,25 +62,11 @@ class MemCanvas final : public epd::Canvas {
           }
           for (int t = 0; t < S; ++t) { fputc(r, f); fputc(g, f); fputc(b, f); }
         }
-      }
-    }
     fclose(f);
   }
 
-  void writePbm(const char* path) const {
-    FILE* f = fopen(path, "wb");
-    if (!f) { perror(path); return; }
-    fprintf(f, "P1\n%d %d\n", kW, kH);
-    for (int y = 0; y < kH; ++y) {
-      for (int x = 0; x < kW; ++x)
-        fprintf(f, "%d ", px_[static_cast<size_t>(y) * kW + x] ? 1 : 0);
-      fputc('\n', f);
-    }
-    fclose(f);
-  }
-
-  // Ink extent, so overlap between the left column and the temperature block can
-  // be detected numerically rather than by squinting.
+  // Ink extent in a row band, so collisions are detected numerically rather than
+  // by squinting at the render.
   void inkBounds(int y0, int y1, int* minX, int* maxX) const {
     *minX = kW; *maxX = -1;
     for (int y = y0; y <= y1 && y < kH; ++y)
@@ -95,23 +81,25 @@ class MemCanvas final : public epd::Canvas {
   uint8_t px_[static_cast<size_t>(kW) * kH];
 };
 
+int fails = 0;
+
 void checkWidth(const char* label, const epd::GFXfont& f, const char* s,
                 int budget) {
   const int w = epd::measureText(f, s).advance;
-  printf("  %-22s %-24s %4d px / %4d %s\n", label, s, w, budget,
-         w <= budget ? "ok" : "*** OVERFLOWS ***");
+  const bool ok = w <= budget;
+  if (!ok) ++fails;
+  printf("  %-20s %-22s %4d px / %4d %s\n", label, s, w, budget,
+         ok ? "ok" : "*** OVERFLOWS ***");
 }
 
-// Vertical extent is the thing that actually bit us: a baseline chosen from cap
-// height alone clips descenders ('y' in "Partly cloudy", 'p' in "Sep") straight
-// off the bottom edge of a 122px panel. Check it numerically.
 void checkVertical(const char* label, const epd::GFXfont& f, const char* s,
                    int baseline, int topLimit, int bottomLimit) {
   const epd::TextMetrics m = epd::measureText(f, s);
-  const int top = baseline + m.inkTop;      // inkTop is negative
-  const int bot = baseline + m.inkBottom;   // positive for descenders
+  const int top = baseline + m.inkTop;     // inkTop is negative
+  const int bot = baseline + m.inkBottom;  // positive for descenders
   const bool ok = top >= topLimit && bot <= bottomLimit;
-  printf("  %-22s %-20s baseline=%3d  ink y=[%3d..%3d]  allowed [%d..%d] %s\n",
+  if (!ok) ++fails;
+  printf("  %-20s %-18s baseline=%3d ink y=[%3d..%3d] allowed [%d..%d] %s\n",
          label, s, baseline, top, bot, topLimit, bottomLimit,
          ok ? "ok" : "*** CLIPS ***");
 }
@@ -120,127 +108,73 @@ void checkVertical(const char* label, const epd::GFXfont& f, const char* s,
 
 int main() {
   printf("font metrics\n");
-  printf("  Font_Clock yAdvance=%d  Font_Temp yAdvance=%d  "
-         "Font_Date yAdvance=%d  Font_Cond yAdvance=%d\n",
-         epd::Font_Clock.yAdvance, epd::Font_Temp.yAdvance,
-         epd::Font_Date.yAdvance, epd::Font_Cond.yAdvance);
+  printf("  Font_Big yAdvance=%d  Font_Label yAdvance=%d  Font_Cond yAdvance=%d\n",
+         epd::Font_Big.yAdvance, epd::Font_Label.yAdvance, epd::Font_Cond.yAdvance);
 
-  printf("\nwidth budgets (measured, not estimated)\n");
-  checkWidth("clock widest", epd::Font_Clock, "23:59", 244);
-  checkWidth("clock 00:00", epd::Font_Clock, "00:00", 244);
-  checkWidth("clock 11:11", epd::Font_Clock, "11:11", 244);
-  checkWidth("date worst", epd::Font_Date, "Wed 24 Sep", kLeftMaxW);
-  checkWidth("cond worst", epd::Font_Cond, "Heavy showers", kLeftMaxW);
-  checkWidth("cond worst2", epd::Font_Cond, "Partly cloudy", kLeftMaxW);
-  checkWidth("cond worst3", epd::Font_Cond, "Freezing fog", kLeftMaxW);
-  checkWidth("temp widest", epd::Font_Temp, "-15", 56);
+  // The temperature column is right-aligned at kTempRightX, so the budget is the
+  // gap between the widest label and that edge.
+  const int tempBudget = kTempRightX - 4 - kLabelMaxW;
+  printf("\nwidth budgets (measured)\n");
+  checkWidth("temp typical", epd::Font_Big, "21.4", tempBudget);
+  checkWidth("temp 1 digit", epd::Font_Big, "7.8", tempBudget);
+  checkWidth("temp negative", epd::Font_Big, "-12.4", tempBudget);
+  checkWidth("temp 3 digit", epd::Font_Big, "100.0", tempBudget);
+  checkWidth("temp unknown", epd::Font_Big, "--", tempBudget);
+  checkWidth("label IN", epd::Font_Label, "IN", kLabelMaxW);
+  checkWidth("label OUT", epd::Font_Label, "OUT", kLabelMaxW);
+  // Forecast format is "<condition> <lo>/<hi> <rain>%". The longest WMO strings
+  // are 13 chars ("Partly cloudy", "Heavy drizzle", "Heavy showers"), so the
+  // realistic worst case is checked here. drawTextClipped is the backstop for
+  // anything pathological — it truncates with ".." rather than overflowing.
+  checkWidth("fc typical", epd::Font_Cond, "Partly cloudy 6/17 10%", kFcMaxW);
+  checkWidth("fc long cond", epd::Font_Cond, "Heavy drizzle 2/11 90%", kFcMaxW);
+  checkWidth("fc negative lo", epd::Font_Cond, "Heavy showers -9/45 100%", kFcMaxW);
+  checkWidth("fc no rain data", epd::Font_Cond, "Partly cloudy 6/17", kFcMaxW);
 
-  // Exhaustive sweep of every weekday x month combination against the column
-  // budget, so the worst case is known rather than assumed.
-  printf("\ndate worst case over all weekday/month combinations (budget %d)\n",
-         kLeftMaxW);
-  const char* days[] = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
-  const char* mons[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-  int worst = 0;
-  char worstBuf[64] = {};
-  for (const char* d : days) {
-    for (const char* mo : mons) {
-      char buf[64];
-      snprintf(buf, sizeof buf, "%s 28 %s", d, mo);
-      const int w = epd::measureText(epd::Font_Date, buf).advance;
-      if (w > worst) { worst = w; snprintf(worstBuf, sizeof worstBuf, "%s", buf); }
-    }
-  }
-  printf("  %-24s %4d px / %4d %s\n", worstBuf, worst, kLeftMaxW,
-         worst <= kLeftMaxW ? "ok" : "*** OVERFLOWS ***");
+  printf("\nvertical budgets (kH=%d, rule at y=94..96)\n", kH);
+  checkVertical("inside label", epd::Font_Label, "IN", kInsideLabelBaseline, 0, 93);
+  checkVertical("inside temp", epd::Font_Big, "-12.4", kInsideTempBaseline, 0, 93);
+  checkVertical("outside label", epd::Font_Label, "OUT", kOutsideLabelBaseline, 0, 93);
+  checkVertical("outside temp", epd::Font_Big, "-12.4", kOutsideTempBaseline, 0, 93);
+  checkVertical("forecast desc", epd::Font_Cond, "Heavy drizzle 2/11 90%", kFcBaseline, 97, 121);
 
-  // Every WMO condition string against its column, since the table in
-  // WeatherClient.cpp is hand-written and easy to extend past the budget.
-  printf("\nWMO condition strings (budget %d)\n", kLeftMaxW);
-  const char* conds[] = {
-      "Clear", "Mainly clear", "Partly cloudy", "Overcast", "Fog",
-      "Freezing fog", "Light drizzle", "Drizzle", "Heavy drizzle",
-      "Icy drizzle", "Light rain", "Rain", "Heavy rain", "Icy rain",
-      "Light snow", "Snow", "Heavy snow", "Snow grains", "Light showers",
-      "Showers", "Heavy showers", "Snow showers", "Thunderstorm",
-      "Storm, hail", "Severe storm"};
-  int condWorst = 0;
-  char condWorstBuf[64] = {};
-  for (const char* s : conds) {
-    const int w = epd::measureText(epd::Font_Cond, s).advance;
-    if (w > condWorst) {
-      condWorst = w;
-      snprintf(condWorstBuf, sizeof condWorstBuf, "%s", s);
-    }
-  }
-  printf("  %-24s %4d px / %4d %s\n", condWorstBuf, condWorst, kLeftMaxW,
-         condWorst <= kLeftMaxW ? "ok" : "*** OVERFLOWS ***");
-
-  // --- vertical budgets --------------------------------------------------
-  // The clock must clear the top edge and stay above the y=76 rule; the two lower
-  // rows must fit between the rule and the bottom edge without colliding.
-  printf("\nvertical budgets (kH=%d, rule at y=76..78)\n", kH);
-  checkVertical("clock", epd::Font_Clock, "23:59", kClockBaseline, 0, 75);
-  checkVertical("date ascender", epd::Font_Date, "Wed 24 Sep", kDateBaseline, 79, 121);
-  checkVertical("date descender", epd::Font_Date, "Sep", kDateBaseline, 79, 121);
-  checkVertical("cond descender", epd::Font_Cond, "Partly cloudy", kCondBaseline, 79, 121);
-  checkVertical("cond descender2", epd::Font_Cond, "Light drizzle", kCondBaseline, 79, 121);
-  checkVertical("temp", epd::Font_Temp, "-15", kTempBaseline, 79, 121);
-
-  // Date and condition must not overlap vertically.
+  // Row separation: the inside block must not touch the outside block, and the
+  // two forecast lines must not touch each other.
   {
-    const epd::TextMetrics d = epd::measureText(epd::Font_Date, "Sep");
-    const epd::TextMetrics c = epd::measureText(epd::Font_Cond, "Partly cloudy");
-    const int dBot = kDateBaseline + d.inkBottom;
-    const int cTop = kCondBaseline + c.inkTop;
-    printf("  %-22s date bottom=%d  cond top=%d  %s\n", "row separation", dBot,
-           cTop, cTop > dBot ? "ok" : "*** ROWS COLLIDE ***");
+    const epd::TextMetrics a = epd::measureText(epd::Font_Big, "-12.4");
+    const int insideBot = kInsideTempBaseline + a.inkBottom;
+    const int outsideTop = kOutsideLabelBaseline + epd::measureText(epd::Font_Label, "OUT").inkTop;
+    const bool ok = outsideTop > insideBot;
+    if (!ok) ++fails;
+    printf("  %-20s inside bottom=%d  outside label top=%d  %s\n", "row separation",
+           insideBot, outsideTop, ok ? "ok" : "*** ROWS COLLIDE ***");
   }
-
-  struct Case {
-    const char* name;
-    ScreenModel m;
-  };
+  struct Case { const char* name; ScreenModel m; };
   std::vector<Case> cases;
 
-  {   // the normal, everyday screen
-    Case c{"normal", {}};
-    snprintf(c.m.clock, sizeof c.m.clock, "%s", "14:35");
-    snprintf(c.m.date, sizeof c.m.date, "%s", "Wed 24 Sep");
-    snprintf(c.m.cond, sizeof c.m.cond, "%s", "Partly cloudy");
-    snprintf(c.m.temp, sizeof c.m.temp, "%s", "21");
-    c.m.haveTemp = true;
-    cases.push_back(c);
-  }
-  {   // widest possible everything
-    Case c{"widest", {}};
-    snprintf(c.m.clock, sizeof c.m.clock, "%s", "23:59");
-    snprintf(c.m.date, sizeof c.m.date, "%s", "Wed 28 Sep");
-    snprintf(c.m.cond, sizeof c.m.cond, "%s", "Heavy showers");
-    snprintf(c.m.temp, sizeof c.m.temp, "%s", "-15");
-    c.m.haveTemp = true;
-    cases.push_back(c);
-  }
-  {   // weather never fetched
-    Case c{"no-weather", {}};
-    snprintf(c.m.clock, sizeof c.m.clock, "%s", "06:05");
-    snprintf(c.m.date, sizeof c.m.date, "%s", "Mon 1 Jan");
-    snprintf(c.m.temp, sizeof c.m.temp, "%s", "--");
-    c.m.haveTemp = false;
-    cases.push_back(c);
-  }
-  {   // stale weather -> dashed rule
-    Case c{"stale", {}};
-    snprintf(c.m.clock, sizeof c.m.clock, "%s", "09:20");
-    snprintf(c.m.date, sizeof c.m.date, "%s", "Sat 12 Jul");
-    snprintf(c.m.cond, sizeof c.m.cond, "%s", "Overcast");
-    snprintf(c.m.temp, sizeof c.m.temp, "%s", "8");
-    c.m.haveTemp = true;
-    c.m.stale = true;
-    cases.push_back(c);
-  }
-  {   // provisioning banner
+  auto mk = [](const char* name, const char* inL, const char* inT, bool inV,
+               const char* outL, const char* outT, bool outV,
+               const char* fc) {
+    Case c{name, {}};
+    snprintf(c.m.insideLabel, sizeof c.m.insideLabel, "%s", inL);
+    snprintf(c.m.insideTemp, sizeof c.m.insideTemp, "%s", inT);
+    c.m.insideValid = inV;
+    snprintf(c.m.outsideLabel, sizeof c.m.outsideLabel, "%s", outL);
+    snprintf(c.m.outsideTemp, sizeof c.m.outsideTemp, "%s", outT);
+    c.m.outsideValid = outV;
+    snprintf(c.m.forecast, sizeof c.m.forecast, "%s", fc);
+    return c;
+  };
+
+  cases.push_back(mk("normal", "IN", "21.4", true, "OUT", "7.8", true,
+                     "Partly cloudy 6/17 10%"));
+  cases.push_back(mk("widest", "IN", "-12.4", true, "OUT", "100.0", true,
+                     "Heavy showers -9/45 100%"));
+  cases.push_back(mk("no-mqtt", "IN", "--", false, "OUT", "--", false,
+                     "Clear 6/17 - no MQTT yet"));
+  cases.push_back(mk("lounge", "IN", "19.0", true, "OUT", "3.2", true,
+                     "Heavy drizzle 2/11 90%"));
+  {
     Case c{"banner", {}};
     c.m.banner = "einkclock";
     c.m.banner2 = "Run ESP-Touch v2 to set up Wi-Fi";
@@ -251,21 +185,16 @@ int main() {
   for (const auto& c : cases) {
     MemCanvas cv;
     renderScreen(cv, c.m);
-
-    char ppm[128], pbm[128];
+    char ppm[128];
     snprintf(ppm, sizeof ppm, "out-%s.ppm", c.name);
-    snprintf(pbm, sizeof pbm, "out-%s.pbm", c.name);
     cv.writePpm(ppm);
-    cv.writePbm(pbm);
-
-    // Collision check: the left column (date/cond) must not reach into the
-    // temperature block. Measured, not eyeballed.
     int lo, hi;
-    cv.inkBounds(79, 121, &lo, &hi);
-    printf("  %-12s -> %-20s lower-band ink x=[%d..%d]%s\n", c.name, ppm, lo, hi,
+    cv.inkBounds(0, kH - 1, &lo, &hi);
+    printf("  %-10s -> %-20s ink x=[%d..%d]%s\n", c.name, ppm, lo, hi,
            hi > 249 ? "  *** CLIPPED ***" : "");
   }
 
-  printf("\nopen them with:  open tools/preview/out-*.ppm\n");
-  return 0;
+  printf("\n%s (%d budget failure%s)\n", fails ? "FAILED" : "all budgets ok",
+         fails, fails == 1 ? "" : "s");
+  return fails ? 1 : 0;
 }

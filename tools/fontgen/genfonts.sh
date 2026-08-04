@@ -3,18 +3,15 @@
 # Run from anywhere; writes the component file in place.
 #
 # Why these faces (all stock macOS, nothing to install):
-#   Arial Bold  — the clock, the temperature and the date.
-#   Arial       — the weather condition line (lighter, secondary).
+#   Arial Bold  — the two big temperatures and their labels.
+#   Arial       — the forecast line (lighter, secondary).
 #
-# Clock size was chosen by MEASUREMENT, not from font metrics tables. The binding
-# constraint is height (the band between the top edge and the y=76 rule), not
-# width, so a condensed face is the wrong trade: Arial Narrow Bold 88pt measured
-# only 184px wide for "23:59", wasting 60px of a 244px budget. Arial Bold at 92pt
-# is 235px wide at the same 67px figure height — same vertical footprint, much
-# heavier strokes, far more legible across a room. 94pt would be 239px, leaving
-# too little margin; 96pt overflows.
+# Sizes are chosen by MEASUREMENT via tools/preview, never from metrics tables.
+# Font_Big at 52pt gives 38px figures, which lets two temperature rows plus a
+# forecast line fit 122px of height. Verify any change with `make run` in
+# tools/preview — it asserts every width and vertical budget.
 #
-# Character ranges are trimmed hard: the clock face is 11 glyphs, not 95.
+# Character ranges are trimmed hard: Font_Big is 13 glyphs, not 95.
 set -e
 set -o pipefail
 cd "$(dirname "$0")"
@@ -44,12 +41,11 @@ OUT=../../components/epaper/fonts/fonts.cpp
     echo '#include "fonts.h"'
     echo
     echo 'namespace epd {'
-    # Clock: '0'..'9' and ':' == 0x30..0x3A, exactly 11 glyphs.
-    ./fontgen "$BOLD"        92 48 58  Font_Clock
-    # Temp: '-' '.' '/' '0'..'9' == 0x2D..0x39. '/' is along for the ride.
-    ./fontgen "$BOLD"        38 45 57  Font_Temp
-    # Date and condition need printable ASCII.
-    ./fontgen "$BOLD"        24 32 126 Font_Date
+    # Big temperatures: '-' '.' '/' '0'..'9' == 0x2D..0x39 (13 glyphs).
+    # '/' rides along in the range and is used by the forecast hi/lo.
+    ./fontgen "$BOLD"        52 45 57  Font_Big
+    # Labels (INSIDE / OUTSIDE) and the forecast need printable ASCII.
+    ./fontgen "$BOLD"        24 32 126 Font_Label
     ./fontgen "$REG"         20 32 126 Font_Cond
     echo
     echo '}  // namespace epd'

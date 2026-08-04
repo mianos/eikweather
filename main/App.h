@@ -1,6 +1,7 @@
 #pragma once
 #include "Epaper.h"
 #include "Settings.h"
+#include "Sensors.h"
 #include "WeatherClient.h"
 
 class WiFiManager;
@@ -12,6 +13,7 @@ struct App {
   Settings* settings;
   epd::Panel* panel;
   WeatherClient* weather;
+  Sensors* sensors;
   WiFiManager* wifi;
 
   Weather current{};
@@ -19,7 +21,6 @@ struct App {
   // Diagnostics surfaced on GET /healthz.
   uint32_t renderCount = 0;
   int32_t lastStackHighWater = 0;
-  char lastClock[8] = {};
 
   // Set by the web server to request a one-off test pattern on the next wake.
   // 0 = none, otherwise a TestPattern value.

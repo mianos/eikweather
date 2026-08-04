@@ -112,16 +112,33 @@ void ClockWebServer::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("weather_status", app_.weather->lastStatus());
   json.AddItem("wmo_code", app_.current.code);
   json.AddItem("wmo_text", std::string(wmoText(app_.current.code)));
-  json.AddItem("temp", app_.current.temp);
+  json.AddItem("lo", app_.current.lo);
+  json.AddItem("hi", app_.current.hi);
+  json.AddItem("rain_pct", app_.current.rainPct);
   const time_t now = time(nullptr);
   json.AddItem("weather_age_s",
                app_.current.valid ? static_cast<int>(now - app_.current.fetchedAt)
                                   : -1);
 
+  // Local MQTT readings — the primary content, so surface enough to debug a
+  // wrong topic or field name without a serial cable.
+  const Reading& in = app_.sensors->inside();
+  const Reading& out = app_.sensors->outside();
+  json.AddItem("mqtt_messages", static_cast<int>(app_.sensors->messages()));
+  json.AddItem("inside_topic", settings_.insideTopic);
+  json.AddItem("inside_seen", in.everSeen);
+  json.AddItem("inside_value", in.value);
+  json.AddItem("inside_age_s", in.everSeen ? static_cast<int>(now - in.at) : -1);
+  json.AddItem("inside_fresh", in.fresh(settings_.sensorStaleMin));
+  json.AddItem("outside_topic", settings_.outsideTopic);
+  json.AddItem("outside_seen", out.everSeen);
+  json.AddItem("outside_value", out.value);
+  json.AddItem("outside_age_s", out.everSeen ? static_cast<int>(now - out.at) : -1);
+  json.AddItem("outside_fresh", out.fresh(settings_.sensorStaleMin));
+
   json.AddItem("panel_w", settings_.panelW);
   json.AddItem("panel_h", settings_.panelH);
   json.AddItem("rotation", settings_.rotation);
-  json.AddItem("shown_clock", std::string(app_.lastClock));
 
   char localNow[32] = "";
   if (now > 1700000000) {

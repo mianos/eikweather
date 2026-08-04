@@ -9,8 +9,7 @@ dependencies:
   # .gitignore) to keep builds reproducible. `idf.py update-dependencies` moves
   # forward deliberately.
   #
-  # Deliberately NOT depended on: mqttwrapper (drags std::regex; this device
-  # publishes nothing), httpclient (cannot do HTTPS — no crt_bundle_attach in its
+  # Deliberately NOT depended on: httpclient (cannot do HTTPS — no crt_bundle_attach in its
   # esp_http_client_config_t, so WeatherClient calls esp_http_client directly),
   # otawrapper (the small /firmware handler is enough), audioplayer, button
   # (its ctor calls gpio_pullup_en, which cannot work on input-only GPIO34).
@@ -34,3 +33,8 @@ dependencies:
     git: git@github.com:mianos/mianesp.git
     path: components/settingsbase
     version: main
+  mqttwrapper:
+    git: git@github.com:mianos/mianesp.git
+    path: components/mqttwrapper
+    version: main
+  espressif/mqtt: "*"

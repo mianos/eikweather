@@ -1,22 +1,26 @@
 # einkclock
 
-Clock and current weather on a Lonely Binary ESP32 e-ink board (2.13" tri-colour,
-250×122, SSD1680). ESP-IDF v6.0.1, target `esp32`.
+Indoor/outdoor temperature and forecast on a Lonely Binary ESP32 e-ink board
+(2.13" tri-colour, 250×122, SSD1680). ESP-IDF v6.0.1, target `esp32`.
 
-Repaints on the wall-clock 5-minute boundary. Wi-Fi, persisted settings, an HTTP
-config API and push-OTA come from the shared [mianesp](https://github.com/mianos/mianesp)
-component library; the SSD1680 driver, the text renderer and the layout are local.
+Indoor and outdoor readings come from local MQTT (published by Node-RED); the
+forecast comes from Open-Meteo. Wi-Fi, MQTT, persisted settings, an HTTP config
+API and push-OTA come from the shared
+[mianesp](https://github.com/mianos/mianesp) component library; the SSD1680
+driver, the text renderer and the layout are local.
 
 ```
-┌───────────────────────────────────────┐
-│            14:35                      │   Font_Clock, 92pt Arial Bold
-│═══════════════════════════════════════│   ← RED rule (dashed = stale weather)
-│  Wed 24 Sep                   21°     │   date BLACK · temp RED
-│  Partly cloudy                        │
-└───────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│  IN                       21.4°     │  Font_Big 52pt · BLACK
+│  OUT                       7.8°     │  RED
+│═════════════════════════════════════│  RED rule
+│  Partly cloudy 6/17 10%             │  Font_Cond
+└─────────────────────────────────────┘
 ```
 
-## Why it updates every 5 minutes and not every minute
+**It is not a clock, deliberately.** See below.
+
+## Why this is not a clock, and when it repaints
 
 The panel has **no partial refresh** and a full refresh measured at **18.7 s at
 room temperature, 24.6 s at 7.8 degC** — waveform duration rises as the panel gets
@@ -48,10 +52,21 @@ and released BUSY without driving the panel. The ~20 s of that 24.5 s that looks
 passes — cutting it short looks fine for a minute, then fades and accumulates
 ghosting.
 
-A per-minute clock would therefore have the screen mid-flash roughly a third of
-the time and would wear the panel out. At 5 minutes the duty cycle is ~6%. The
-time is shown rounded down to the boundary, and the paint is *started* early
-(`render_lead_s`) so it **finishes** at :00/:05/… rather than beginning there.
+This started life as a clock and that was a mistake: advancing a minute costs
+~25 s of visible flashing, so the panel would have been mid-refresh a third of
+the time for no benefit. There is no display technology argument that survives
+that ratio.
+
+So it repaints **only when the drawn content actually changes**, and the
+comparison is made on the *formatted strings* — exactly the question "would the
+screen look different?". A 0.01 degC wobble that does not alter a displayed digit
+costs nothing. `min_interval_min` (default 10) rate-limits repaints and is
+clamped to >=3 so a bad setting cannot drive the glass harder than the vendor
+allows.
+
+Comparing formatted output beats a temperature-delta threshold: there is no
+threshold to tune, and it automatically accounts for rounding, the staleness
+fallback to `--`, and forecast text changes.
 
 ## Hardware
 

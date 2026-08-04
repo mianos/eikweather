@@ -35,14 +35,15 @@ bool WeatherClient::fetch(Weather& out) {
   // temperature_unit takes Open-Meteo's own vocabulary ("celsius"/"fahrenheit"),
   // so the setting passes straight through with no mapping table.
   //
-  // `timezone` is deliberately NOT requested: we already have the local clock from
-  // SNTP, and measuring staleness against our own time() at the moment of success
-  // is more honest than trusting the server's `current.time`.
+  // timezone=auto is required for the daily block to align to LOCAL days rather
+  // than UTC ones — without it the min/max can belong to the wrong day.
   std::string url = "https://api.open-meteo.com/v1/forecast?latitude=";
   url += settings_.latitude;
   url += "&longitude=";
   url += settings_.longitude;
-  url += "&current=temperature_2m,weather_code&temperature_unit=";
+  url += "&current=weather_code";
+  url += "&daily=temperature_2m_min,temperature_2m_max,precipitation_probability_max";
+  url += "&timezone=auto&forecast_days=1&temperature_unit=";
   url += settings_.tempUnit;
 
   std::string body;
@@ -76,32 +77,61 @@ bool WeatherClient::fetch(Weather& out) {
              static_cast<int>(body.size() > 160 ? 160 : body.size()),
              body.c_str());
   } else {
-    // JsonWrapper::GetField reaches only FLAT top-level keys, and
-    // temperature_2m lives under "current" — so parse with cJSON directly. A
-    // GetObject() on JsonWrapper cannot be made safe as it stands: it owns its
-    // tree via unique_ptr<cJSON, cJSON_Delete>, so a wrapper around a child the
-    // parent still owns would double-free.
     cJSON* root = cJSON_Parse(body.c_str());
     if (!root) {
       ESP_LOGW(TAG, "unparseable JSON (%u bytes)",
                static_cast<unsigned>(body.size()));
     } else {
+      // JsonWrapper::GetField reaches only FLAT top-level keys, and everything we
+      // want is nested (and the daily values are single-element ARRAYS) — so parse
+      // with cJSON directly. A GetObject() on JsonWrapper cannot be made safe as
+      // it stands: it owns its tree via unique_ptr<cJSON, cJSON_Delete>, so a
+      // wrapper around a child the parent still owns would double-free.
+      //
+      // Everything is written into a LOCAL first and only copied into `out` once
+      // the whole parse has succeeded, so a partial response can never corrupt
+      // the last-known-good forecast.
+      Weather w{};
+      bool haveCode = false, haveDaily = false;
+
       if (cJSON* cur = cJSON_GetObjectItemCaseSensitive(root, "current")) {
-        cJSON* t = cJSON_GetObjectItemCaseSensitive(cur, "temperature_2m");
         cJSON* wc = cJSON_GetObjectItemCaseSensitive(cur, "weather_code");
-        if (cJSON_IsNumber(t) && cJSON_IsNumber(wc)) {
-          // Only now do we touch `out` — a partial parse must not corrupt the
-          // last-known-good reading.
-          out.temp = static_cast<float>(t->valuedouble);
-          out.code = wc->valueint;
-          out.valid = true;
-          out.fetchedAt = time(nullptr);
-          ok = true;
-        } else {
-          ESP_LOGW(TAG, "current.{temperature_2m,weather_code} missing/not numeric");
+        if (cJSON_IsNumber(wc)) {
+          w.code = wc->valueint;
+          haveCode = true;
         }
+      }
+
+      if (cJSON* daily = cJSON_GetObjectItemCaseSensitive(root, "daily")) {
+        // Each daily field is an array with forecast_days entries; we asked for 1.
+        auto first = [&](const char* key, double* outVal) -> bool {
+          cJSON* arr = cJSON_GetObjectItemCaseSensitive(daily, key);
+          if (!cJSON_IsArray(arr)) return false;
+          cJSON* v = cJSON_GetArrayItem(arr, 0);
+          if (!cJSON_IsNumber(v)) return false;
+          *outVal = v->valuedouble;
+          return true;
+        };
+        double lo = 0, hi = 0, rain = 0;
+        if (first("temperature_2m_min", &lo) && first("temperature_2m_max", &hi)) {
+          w.lo = static_cast<float>(lo);
+          w.hi = static_cast<float>(hi);
+          haveDaily = true;
+          // Precipitation probability is optional: some locations return nulls.
+          w.rainPct = first("precipitation_probability_max", &rain)
+                          ? static_cast<int>(rain)
+                          : -1;
+        }
+      }
+
+      if (haveCode && haveDaily) {
+        w.valid = true;
+        w.fetchedAt = time(nullptr);
+        out = w;
+        ok = true;
       } else {
-        ESP_LOGW(TAG, "no \"current\" object in response");
+        ESP_LOGW(TAG, "incomplete response (code=%d daily=%d)", haveCode,
+                 haveDaily);
       }
       cJSON_Delete(root);  // single exit point; no early return after Parse
     }
@@ -112,15 +142,15 @@ bool WeatherClient::fetch(Weather& out) {
 
   if (ok) {
     failures_ = 0;
-    ESP_LOGI(TAG, "%.1f deg, code %d (%s)", out.temp, out.code,
-             wmoText(out.code));
+    ESP_LOGI(TAG, "%s, %.1f/%.1f deg, rain %d%%", wmoText(out.code), out.lo,
+             out.hi, out.rainPct);
   } else {
     ++failures_;
-    // Log loudly once an hour's worth of attempts have failed, but never reboot:
-    // a wall clock that restarts because an HTTP request timed out is worse than
-    // one showing a slightly stale temperature.
-    if (failures_ == 12) {
-      ESP_LOGE(TAG, "12 consecutive weather failures (~1 hour)");
+    // Log loudly after a run of failures, but NEVER reboot: the indoor/outdoor
+    // readings come from MQTT and are still correct, so a weather outage must not
+    // cost the user the main display.
+    if (failures_ == 8) {
+      ESP_LOGE(TAG, "8 consecutive weather failures");
     }
   }
   return ok;

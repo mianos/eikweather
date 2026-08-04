@@ -17,6 +17,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.7.19~2
+  espressif/mqtt:
+    component_hash: fb18bc3b65aa8c94693a9811ffc322cca8a65d92d5ec84983d3e385080e3969c
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.1.0
   espressif/network_provisioning:
     component_hash: 72d27784e3daf807418a34fb00be136ec50c6db49d989ce981d22e031fc0e7f8
     dependencies:
@@ -45,6 +55,26 @@ dependencies:
     source:
       git: git@github.com:mianos/mianesp.git
       path: components/jsonwrapper
+      type: git
+    version: 3f2196051cee784e89c48555966ccc8781b0dae0
+  mqttwrapper:
+    component_hash: b58e7ecbf9e4dd40a0961e2617ad54a6985be88c5ad632b31b2631da3c98a1da
+    dependencies:
+    - name: espressif/mqtt
+      version: '*'
+    - name: espressif/cjson
+      version: '*'
+    - git: git@github.com:mianos/mianesp.git
+      name: jsonwrapper
+      path: components/jsonwrapper
+      version: main
+    - git: git@github.com:mianos/mianesp.git
+      name: nvsstoragemanager
+      path: components/nvsstoragemanager
+      version: main
+    source:
+      git: git@github.com:mianos/mianesp.git
+      path: components/mqttwrapper
       type: git
     version: 3f2196051cee784e89c48555966ccc8781b0dae0
   nvsstoragemanager:
@@ -106,11 +136,13 @@ dependencies:
       type: git
     version: 3f2196051cee784e89c48555966ccc8781b0dae0
 direct_dependencies:
+- espressif/mqtt
 - jsonwrapper
+- mqttwrapper
 - nvsstoragemanager
 - settingsbase
 - webserver
 - wifimanager
-manifest_hash: 895b073cdae65672eda13ad1ab66cbff17c14569c0e488f530036d6bd9ca74fa
+manifest_hash: d45b305e7e2c2faa0cb2bd1989c958e952a47a7ceb95bdeda172f35854d009e2
 target: esp32
 version: 3.0.0

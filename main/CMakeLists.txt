@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 idf_component_register(
     SRCS "main.cpp" "Layout.cpp" "WeatherClient.cpp" "ClockWebServer.cpp"
+         "Sensors.cpp"
     INCLUDE_DIRS "."
     REQUIRES
       # mianesp (git deps — see idf_component.yml).
@@ -17,6 +18,8 @@ idf_component_register(
       settingsbase
       webserver
       jsonwrapper
+      mqttwrapper
+      espressif__mqtt
       # app-local
       epaper
       # IDF

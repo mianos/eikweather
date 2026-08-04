@@ -27,24 +27,41 @@ struct Settings : SettingsBase {
   std::string longitude = "151.2093";
   std::string tempUnit = "celsius";    // "celsius" | "fahrenheit", passed through
 
+  // --- MQTT (local readings) --------------------------------------------
+  std::string mqttServer = "mqtt2.mianos.com";
+  int mqttPort = 1883;
+
+  // Topics and field names, so the display can be re-pointed with POST /config
+  // and no reflash. An empty topic means "not used" and shows "--".
+  // Payloads are flat JSON objects with a named numeric field, which is the
+  // convention on this broker (tele/ldr/lux publishes {"lux":71.2682,...}).
+  std::string insideTopic = "";
+  std::string insideField = "temperature";
+  std::string insideLabel = "IN";
+  std::string outsideTopic = "";
+  std::string outsideField = "temperature";
+  std::string outsideLabel = "OUT";
+
+  // A reading older than this shows "--" rather than leaving a plausible but
+  // hours-old number on a display that repaints only every few minutes.
+  // 0 disables the staleness check.
+  int sensorStaleMin = 30;
+
   // --- refresh cadence --------------------------------------------------
-  // Must divide 60 so local minute-of-hour alignment is well defined; clamped at
-  // use. The tri-colour panel has NO partial refresh and takes ~27-30 s for a full
-  // one, and Good Display advise >=180 s between refreshes — so anything under 5
-  // is for bench testing only.
-  int refreshMin = 5;
-  // Start the fetch+render this many seconds BEFORE the boundary so the burn
-  // COMPLETES at :00/:05/... rather than starting there.
+  // This is a WEATHER display, not a clock: it repaints only when the drawn
+  // content actually CHANGES, rather than on a timer. The comparison is done on
+  // the formatted strings, so a 0.01 degC wobble that does not alter a displayed
+  // digit costs nothing — which is the whole point, since a full refresh is
+  // 19-25 s of flashing on this panel and there is no partial refresh.
   //
-  // MEASURED on this panel, and it is NOT a constant: 18.7 s at room temperature,
-  // 24.6 s at 7.8 degC. E-paper waveform duration rises as the panel gets colder
-  // (the controller picks a waveform per temperature range from OTP), so budget
-  // for the cold end, not the warm one.
-  // Budget: ~2 s typical fetch + up to ~25 s render = ~27 s.
-  // 30 biases EARLY at both ends (finishing ~3 s before the boundary when cold,
-  // ~8 s early when warm), which is the better error: showing the upcoming minute
-  // a moment early beats still showing the previous one after the boundary passed.
-  int renderLeadS = 30;
+  // minIntervalMin rate-limits repaints. Good Display advise >=180 s between
+  // tri-colour refreshes, so this is clamped to >=3 at use (see minIntervalSec).
+  int minIntervalMin = 10;
+
+  // How often to re-fetch the Open-Meteo forecast. A fetch only causes a repaint
+  // if the condition text or the hi/lo actually changed.
+  int weatherPollMin = 15;
+
   int bootScreen = 1;  // 0 => skip the boot/status paint
 
   // --- panel geometry & init tunables -----------------------------------
@@ -77,8 +94,17 @@ struct Settings : SettingsBase {
     field("latitude", latitude);
     field("longitude", longitude);
     field("temp_unit", tempUnit);
-    field("refresh_min", refreshMin);
-    field("render_lead_s", renderLeadS);
+    field("mqtt_server", mqttServer);
+    field("mqtt_port", mqttPort);
+    field("inside_topic", insideTopic);
+    field("inside_field", insideField);
+    field("inside_label", insideLabel);
+    field("outside_topic", outsideTopic);
+    field("outside_field", outsideField);
+    field("outside_label", outsideLabel);
+    field("sensor_stale_min", sensorStaleMin);
+    field("min_interval_min", minIntervalMin);
+    field("weather_poll_min", weatherPollMin);
     field("boot_screen", bootScreen);
     field("panel_w", panelW);
     field("panel_h", panelH);
@@ -91,12 +117,10 @@ struct Settings : SettingsBase {
     load();  // MUST be last, after every field() registration
   }
 
-  // Clamp refreshMin to a divisor of 60 so the wall-clock alignment in
-  // main.cpp is always well defined.
-  int refreshPeriodMin() const {
-    static const int kAllowed[] = {1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60};
-    for (int a : kAllowed)
-      if (refreshMin == a) return a;
-    return 5;
+  // Never let a bad setting drive the panel harder than the vendor allows:
+  // Good Display advise >=180 s between tri-colour refreshes.
+  int minIntervalSec() const {
+    const int m = minIntervalMin < 3 ? 3 : minIntervalMin;
+    return m * 60;
   }
 };

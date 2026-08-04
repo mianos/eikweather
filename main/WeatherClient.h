@@ -4,11 +4,13 @@
 
 struct Settings;
 
-// Current conditions from Open-Meteo (no API key required).
+// Forecast from Open-Meteo (no API key required).
 struct Weather {
   bool valid = false;    // has a successful fetch ever happened?
-  float temp = 0.0f;
-  int code = -1;         // WMO weather code
+  int code = -1;         // WMO weather code for the current conditions
+  float lo = 0.0f;       // daily temperature_2m_min
+  float hi = 0.0f;       // daily temperature_2m_max
+  int rainPct = -1;      // daily precipitation_probability_max, -1 if absent
   time_t fetchedAt = 0;  // our own time() at the last SUCCESS, not the server's
 };
 
@@ -20,12 +22,11 @@ class WeatherClient {
  public:
   explicit WeatherClient(const Settings& settings) : settings_(settings) {}
 
-  // Blocking, ~1-3 s, hard 8 s timeout. One attempt, no internal retry: the next
-  // cycle is only a few minutes away and we have last-known-good data.
+  // Blocking, ~1-3 s, hard 8 s timeout. One attempt, no internal retry.
   //
   // On failure `out` is left COMPLETELY UNTOUCHED so the caller keeps showing the
-  // previous reading, and the render proceeds regardless — a failed weather fetch
-  // must never cost the user a correct clock.
+  // previous forecast. The indoor/outdoor readings come from MQTT and are
+  // unaffected either way, so a weather outage never blanks the main display.
   bool fetch(Weather& out);
 
   uint32_t consecutiveFailures() const { return failures_; }
@@ -38,5 +39,5 @@ class WeatherClient {
 };
 
 // WMO weather_code -> a short display string. Empty for unknown codes.
-// Widths are checked against the 164px column by tools/preview.
+// Widths are checked against the forecast line budget by tools/preview.
 const char* wmoText(int code);

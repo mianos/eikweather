@@ -2,33 +2,36 @@
 
 #include "Canvas.h"
 
-// The POD boundary between "what to show" (decided in main.cpp, needs the clock,
-// Wi-Fi and weather) and "how to draw it" (Layout.cpp, pure pixels).
+// The POD boundary between "what to show" (decided in main.cpp, needs MQTT and
+// the weather fetch) and "how to draw it" (Layout.cpp, pure pixels).
 //
 // This split is what makes the layout testable on the host: Layout.cpp includes
 // only Canvas.h / Gfx.h / fonts.h and this header — no esp_* anywhere — so
 // tools/preview compiles it with clang and renders to a PBM in 0.2 s instead of
-// 30 s on glass.
+// ~25 s on glass.
 
 struct ScreenModel {
-  // "07:35". Empty => leave the clock area blank. NEVER put a placeholder time
-  // here: a wrong time burned into e-paper for 5 minutes is worse than nothing.
-  char clock[8] = {};
+  // The two big readings, pre-formatted (e.g. "21.4", "-3.0", or "--" when the
+  // MQTT topic has never been seen or has gone stale).
+  //
+  // Labels are SHORT by default ("IN" / "OUT"). They share the row with the big
+  // digits, so a long label directly steals width from the number: measured at
+  // Font_Label, "OUTSIDE" is 107px, which left only 108px for the temperature and
+  // made "-12.4" (118px) and "100.0" (130px) overflow. Short labels give the
+  // number a 158px budget, which fits every plausible reading.
+  char insideLabel[12] = {};   // "IN" / "LOUNGE" if you prefer, and accept clipping
+  char insideTemp[10] = {};
+  bool insideValid = false;    // false => draw no degree ring
 
-  // "Wed 24 Sep". The weekday is ALWAYS abbreviated: measured at Font_Date,
-  // "Wednesday 24 Sep" is 217px against a 164px column, and only "Friday" and
-  // "Sunday" fit unabbreviated. A date format that silently changes shape
-  // depending on the day of the week reads as a bug, so it is abbreviated
-  // consistently rather than opportunistically.
-  char date[24] = {};
+  char outsideLabel[12] = {};  // "OUT"
+  char outsideTemp[10] = {};
+  bool outsideValid = false;
 
-  char cond[24] = {};  // "Partly cloudy", may be empty
-  char temp[8] = {};   // "21" | "-5" | "--"
+  // ONE forecast line, small type under the rule. Not two: the band between the
+  // rule and the bottom edge is 25px, and two lines of Font_Cond need ~36px.
+  char forecast[48] = {};  // "Clear  6/17  rain 10%"
 
-  bool haveTemp = false;  // false => draw no temperature and no degree ring
-  bool stale = false;     // => dashed separator instead of solid
-
-  // Non-null => draw the boot / provisioning screen instead of the clock.
+  // Non-null => draw the boot / provisioning screen instead of the readings.
   const char* banner = nullptr;
   const char* banner2 = nullptr;
 };
