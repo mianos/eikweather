@@ -1,0 +1,20 @@
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+.DS_Store
+*.tags
+tags
+
+# Host preview tool artefacts
+tools/preview/preview
+tools/preview/*.pbm
+tools/preview/*.png
+
+# Per-machine editor/tooling config (absolute paths, serial ports)
+.vscode/
+.claude/
+
+# NOTE: dependencies.lock is deliberately NOT ignored. The mianesp git deps use
+# `version: main`, so committing the lock is what makes builds reproducible;
+# `idf.py update-dependencies` is the explicit opt-in to move forward.

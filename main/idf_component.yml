@@ -1,0 +1,36 @@
+dependencies:
+  # Shared infrastructure — mianesp repo (same pattern as ws-voice / atomecho /
+  # ldr3 / doorbell3). Requires an SSH key with read access to
+  # git@github.com:mianos/mianesp.git on the build host: verify with
+  #   ssh -T git@github.com
+  # Settings stays app-local (main/Settings.h).
+  #
+  # `version: main` is unpinned, so dependencies.lock IS committed (see
+  # .gitignore) to keep builds reproducible. `idf.py update-dependencies` moves
+  # forward deliberately.
+  #
+  # Deliberately NOT depended on: mqttwrapper (drags std::regex; this device
+  # publishes nothing), httpclient (cannot do HTTPS — no crt_bundle_attach in its
+  # esp_http_client_config_t, so WeatherClient calls esp_http_client directly),
+  # otawrapper (the small /firmware handler is enough), audioplayer, button
+  # (its ctor calls gpio_pullup_en, which cannot work on input-only GPIO34).
+  jsonwrapper:
+    git: git@github.com:mianos/mianesp.git
+    path: components/jsonwrapper
+    version: main
+  nvsstoragemanager:
+    git: git@github.com:mianos/mianesp.git
+    path: components/nvsstoragemanager
+    version: main
+  wifimanager:
+    git: git@github.com:mianos/mianesp.git
+    path: components/wifimanager
+    version: main
+  webserver:
+    git: git@github.com:mianos/mianesp.git
+    path: components/webserver
+    version: main
+  settingsbase:
+    git: git@github.com:mianos/mianesp.git
+    path: components/settingsbase
+    version: main
