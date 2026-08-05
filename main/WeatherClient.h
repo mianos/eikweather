@@ -8,8 +8,11 @@ struct Settings;
 struct Weather {
   bool valid = false;    // has a successful fetch ever happened?
   int code = -1;         // WMO weather code for the current conditions
-  float lo = 0.0f;       // daily temperature_2m_min
-  float hi = 0.0f;       // daily temperature_2m_max
+  // WHOLE degrees. The forecast line has room for "6/17" and nothing more, so a
+  // tenth was never displayed — storing it as one only meant re-rounding at every
+  // use. Rounded once, in the parser.
+  int lo = 0;            // daily temperature_2m_min
+  int hi = 0;            // daily temperature_2m_max
   int rainPct = -1;      // daily precipitation_probability_max, -1 if absent
   time_t fetchedAt = 0;  // our own time() at the last SUCCESS, not the server's
 };

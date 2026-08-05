@@ -2,6 +2,8 @@
 
 #include <cJSON.h>
 
+#include <cmath>
+
 #include "Settings.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -116,8 +118,10 @@ bool WeatherClient::fetch(Weather& out) {
         };
         double lo = 0, hi = 0, rain = 0;
         if (first("temperature_2m_min", &lo) && first("temperature_2m_max", &hi)) {
-          w.lo = static_cast<float>(lo);
-          w.hi = static_cast<float>(hi);
+          // Rounded to whole degrees HERE, the one place the API's double is
+          // seen, rather than at each point of use.
+          w.lo = static_cast<int>(std::lround(lo));
+          w.hi = static_cast<int>(std::lround(hi));
           haveDaily = true;
           // Precipitation probability is optional: some locations return nulls.
           w.rainPct = first("precipitation_probability_max", &rain)
@@ -146,8 +150,8 @@ bool WeatherClient::fetch(Weather& out) {
 
   if (ok) {
     failures_ = 0;
-    ESP_LOGI(TAG, "%s, %.1f/%.1f deg, rain %d%%", wmoText(out.code), out.lo,
-             out.hi, out.rainPct);
+    ESP_LOGI(TAG, "%s, %d/%d deg, rain %d%%", wmoText(out.code), out.lo, out.hi,
+             out.rainPct);
   } else {
     ++failures_;
     // Log loudly after a run of failures, but NEVER reboot: the indoor/outdoor

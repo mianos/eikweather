@@ -24,13 +24,19 @@ esp_err_t Sensors::onMessage(MqttClient*, const std::string& topic,
     return ESP_OK;
   }
 
-  b->dest->value = static_cast<float>(v);
+  // The only float -> fixed-point conversion in the data path. cJSON handed us a
+  // double (it parses every JSON number as one); from here on it is all integers.
+  b->dest->tenths = tenthsFromDegrees(v);
   b->dest->at = time(nullptr);
   b->dest->everSeen = true;
   const Settings& s = b->self->settings_;
   b->dest->updateTrend(s.trendWinMin, s.trendTenths);
   ++b->self->messages_;
-  ESP_LOGI(TAG, "%s %s=%.1f (%s)", b->name, b->field->c_str(), v,
+  char shown[12];
+  formatTenths(shown, sizeof shown, b->dest->tenths);
+  // Logs the stored tenths, not the raw double: if fromDegrees ever clamps or
+  // rounds surprisingly, the log should show what we actually kept.
+  ESP_LOGI(TAG, "%s %s=%s (%s)", b->name, b->field->c_str(), shown,
            trendName(b->dest->trend));
 
   // Wake the display task so it can decide whether this actually changed what is

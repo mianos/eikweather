@@ -16,6 +16,7 @@
 #include "Canvas.h"
 #include "Gfx.h"
 #include "ScreenModel.h"
+#include "Tenths.h"
 #include "fonts.h"
 
 namespace {
@@ -109,9 +110,50 @@ void checkVertical(const char* label, const epd::GFXfont& f, const char* s,
          ok ? "ok" : "*** CLIPS ***");
 }
 
+// Fixed-point conversions. Asserted on the host because the interesting cases are
+// the ones you cannot reach by looking at a screen in August: the sign of
+// sub-degree negatives, and rounding exactly on .5.
+void checkTenths() {
+  printf("\nfixed point (Tenths.h)\n");
+  struct FmtCase { int tenths; const char* want; };
+  const FmtCase fmt[] = {
+      {173, "17.3"}, {0, "0.0"}, {-37, "-3.7"},
+      // THE trap: -0.5 has tenths/10 == 0, so the sign has to come from the
+      // sign of `tenths`, not from the integer division.
+      {-5, "-0.5"},  {-1, "-0.1"}, {999, "99.9"},
+      {-999, "-99.9"}, {1000, "100.0"},
+  };
+  for (const FmtCase& c : fmt) {
+    char got[12];
+    formatTenths(got, sizeof got, c.tenths);
+    const bool ok = strcmp(got, c.want) == 0;
+    if (!ok) ++fails;
+    printf("  formatTenths(%5d) -> %-8s want %-8s %s\n", c.tenths, got, c.want,
+           ok ? "ok" : "*** WRONG ***");
+  }
+
+  struct RoundCase { double deg; int tenths; int whole; };
+  const RoundCase rc[] = {
+      {17.34, 173, 17}, {17.35, 174, 17}, {-3.65, -37, -4},
+      {0.05, 1, 0},     {-0.05, -1, 0},   {2.5, 25, 3},
+      {-2.5, -25, -3},  // half away from zero in BOTH directions
+      {1e9, 9999, 1000}, {-1e9, -999, -100},  // clamped, not overflowed
+  };
+  for (const RoundCase& c : rc) {
+    const int t = tenthsFromDegrees(c.deg);
+    const int w = wholeDegrees(t);
+    const bool ok = t == c.tenths && w == c.whole;
+    if (!ok) ++fails;
+    printf("  %12.4g -> %5d tenths, %5d whole  want %5d / %5d  %s\n", c.deg, t,
+           w, c.tenths, c.whole, ok ? "ok" : "*** WRONG ***");
+  }
+}
+
 }  // namespace
 
 int main() {
+  checkTenths();
+
   printf("font metrics\n");
   printf("  Font_Big yAdvance=%d  Font_Label yAdvance=%d  Font_Cond yAdvance=%d\n",
          epd::Font_Big.yAdvance, epd::Font_Label.yAdvance, epd::Font_Cond.yAdvance);

@@ -124,13 +124,17 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
 
   // Local MQTT readings — the primary content, so surface enough to debug a
   // wrong topic or field name without a serial cable.
+  //
+  // Readings are stored as integer tenths and divided back out HERE, at the
+  // serialisation edge, because JSON has no fixed-point type. That division is the
+  // only floating point left downstream of ingest, and it never feeds a decision.
   const Reading& in = app_.sensors->inside();
   const Reading& out = app_.sensors->outside();
   const Reading& hw = app_.sensors->water();
   json.AddItem("mqtt_messages", static_cast<int>(app_.sensors->messages()));
   json.AddItem("inside_topic", settings_.insideTopic);
   json.AddItem("inside_seen", in.everSeen);
-  json.AddItem("inside_value", in.value);
+  json.AddItem("inside_value", in.tenths / 10.0);
   json.AddItem("inside_age_s", in.everSeen ? static_cast<int>(now - in.at) : -1);
   json.AddItem("inside_fresh", in.fresh(settings_.sensorStaleMin));
   // trend_age_s is how long the current anchor has been held: an "unknown" trend
@@ -141,7 +145,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
                in.refAt ? static_cast<int>(now - in.refAt) : -1);
   json.AddItem("outside_topic", settings_.outsideTopic);
   json.AddItem("outside_seen", out.everSeen);
-  json.AddItem("outside_value", out.value);
+  json.AddItem("outside_value", out.tenths / 10.0);
   json.AddItem("outside_age_s", out.everSeen ? static_cast<int>(now - out.at) : -1);
   json.AddItem("outside_fresh", out.fresh(settings_.sensorStaleMin));
   json.AddItem("outside_trend", trendName(out.trend));
@@ -152,7 +156,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   // so surface enough here to tell them apart.
   json.AddItem("water_topic", settings_.waterTopic);
   json.AddItem("water_seen", hw.everSeen);
-  json.AddItem("water_value", hw.value);
+  json.AddItem("water_value", hw.tenths / 10.0);
   json.AddItem("water_age_s", hw.everSeen ? static_cast<int>(now - hw.at) : -1);
   json.AddItem("water_fresh", hw.fresh(settings_.sensorStaleMin));
   // Computed for free by the shared handler and worth surfacing even though there

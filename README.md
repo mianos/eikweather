@@ -105,10 +105,8 @@ repaints that were happening anyway. Hence one tenth (the smallest change the
 screen can display) over a window matching `min_interval_min` (no reason for the
 mark to move slower than the screen does).
 
-The comparison is done in **integer tenths**, not floats. `17.3f - 17.2f` is
-`0.100000381f`, so a float `>= 0.1f` test misses genuine one-digit changes
-depending on which values you land on. Integer tenths also ask exactly the question
-the repaint logic asks — "did the number you can see change?".
+Temperatures are stored as **integer tenths**, so this comparison is plain integer
+subtraction — see the fixed-point note below.
 
 Consequences worth knowing:
 
@@ -446,6 +444,32 @@ mutex and no torn reads; the TLS handshake's 25–45 KB is fully freed before th
 panel work starts, so the two largest memory peaks never coexist on a 320 KB part;
 and the fetch result is known before anything is drawn, so the stale indicator
 comes from fact rather than a race.
+
+**Temperatures are fixed-point integer tenths** (`Tenths.h`), not floats. 17.3 degC
+is `173`. Tenths is exactly the resolution the screen displays, so every question
+downstream — did the number change, which way did it move, what do I print — is
+exact integer arithmetic, and the double-to-int conversion happens in one place per
+input instead of being re-derived with `lroundf` at each use.
+
+This fixed a real bug rather than being tidiness: `17.3f - 17.2f` is `0.100000381f`,
+so the trend test's `>= 0.1f` would have missed genuine one-digit changes depending
+on which values it landed on. It only looked correct while the threshold was 0.3,
+far from any boundary.
+
+**It is not a size or speed win, and it does not remove floating point.** The binary
+grew ~500 bytes. cJSON parses every JSON number into a double and prints them back
+with `sprintf("%1.15g")`, so double support is linked either way, and the ESP32 has
+hardware single-precision FP regardless. Two conversions remain, both at edges where
+they cannot affect a decision: `tenthsFromDegrees` at MQTT ingest, and dividing back
+out in `/healthz` because JSON has no fixed-point type.
+
+The one trap is **signs below one degree**: for `tenths = -5`, `tenths / 10` is `0`
+and `tenths % 10` is `-5`, so a naive `"%d.%d"` prints `0.5` and silently drops the
+minus for everything between -0.9 and -0.1 — a bug that would first appear on a
+frosty morning. `formatTenths` builds the sign separately, and `tools/preview`
+asserts it along with half-away-from-zero rounding in both directions and the range
+clamps. That is why these helpers live in their own esp-free header: so the host
+can test them.
 
 **The tank temperature is unlabelled because the line is full.** It rides
 right-aligned on the forecast line, directly above the rain chance, with a small

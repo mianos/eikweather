@@ -1,10 +1,10 @@
 #pragma once
-#include <cmath>
 #include <ctime>
 #include <string>
 
 #include "MqttClient.h"
 #include "Settings.h"
+#include "Tenths.h"
 #include "Trend.h"
 
 // Indoor / outdoor temperatures taken from local MQTT (published by Node-RED).
@@ -17,7 +17,8 @@
 // {"lux":71.2682,...}. mianesp's MqttClient hands handlers a parsed JsonWrapper,
 // so that convention is also the only one it can express.
 struct Reading {
-  float value = 0.0f;
+  // Integer TENTHS of a degree — 17.3 degC is 173. See Tenths.h for why.
+  int tenths = 0;
   time_t at = 0;      // our own time() when the message arrived
   bool everSeen = false;
 
@@ -40,15 +41,16 @@ struct Reading {
   // between Steady and Rising around the threshold and burn a refresh each time.
   //
   // Costs 8 bytes per reading and needs no history buffer.
-  float refValue = 0.0f;
+  int refTenths = 0;
   time_t refAt = 0;
   Trend trend = Trend::Unknown;
+
 
   // Call AFTER value/at have been updated from an arriving sample.
   void updateTrend(int winMin, int deltaTenths) {
     const time_t win = static_cast<time_t>(winMin < 1 ? 1 : winMin) * 60;
     if (refAt == 0) {  // first sample: nothing to compare against yet
-      refValue = value;
+      refTenths = tenths;
       refAt = at;
       return;
     }
@@ -61,20 +63,16 @@ struct Reading {
       // gap is not a trend — say so instead of inventing one.
       trend = Trend::Unknown;
     } else {
-      // Compared in integer TENTHS, not floats. Two reasons, and the first is a
-      // real bug avoided: 17.3f - 17.2f is 0.100000381f, so a float `>= 0.1f`
-      // test misses genuine one-digit changes about half the time depending on
-      // which values you land on. Second, tenths are exactly what the screen
-      // draws, so this asks the same question the repaint logic asks — "did the
-      // number you can see change?" — rather than a second, subtly different one.
-      const long d =
-          lroundf(value * 10.0f) - lroundf(refValue * 10.0f);
-      const long thr = deltaTenths < 1 ? 1 : deltaTenths;
+      // Plain integer subtraction — the whole point of storing tenths. Asks
+      // exactly the question the repaint logic asks: "did the number you can see
+      // change, and which way?"
+      const int d = tenths - refTenths;
+      const int thr = deltaTenths < 1 ? 1 : deltaTenths;
       trend = d >= thr    ? Trend::Rising
               : d <= -thr ? Trend::Falling
                           : Trend::Steady;
     }
-    refValue = value;
+    refTenths = tenths;
     refAt = at;
   }
 };

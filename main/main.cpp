@@ -156,7 +156,7 @@ void drawRotationProbe(epd::Panel& p) {
 void formatReading(const Reading& r, int staleMin, char* out, size_t n,
                    bool* valid, Trend* trend) {
   if (r.fresh(staleMin)) {
-    snprintf(out, n, "%.1f", r.value);
+    formatTenths(out, n, r.tenths);
     *valid = true;
     *trend = r.trend;
   } else {
@@ -191,15 +191,13 @@ void buildModel(const App& app, ScreenModel& m) {
   // look broken if blank.
   const Reading& w = app.sensors->water();
   if (w.fresh(s.sensorStaleMin)) {
-    // Clamped for the same reason as the rain percentage: a garbage payload must
-    // not render as "-2147483648".
-    long t = lroundf(w.value);
-    if (t < -99) t = -99;
-    if (t > 999) t = 999;
+    // wholeDegrees rounds half-away-from-zero in integer arithmetic; Reading has
+    // already clamped the range, so nothing here can render as "-2147483648".
+    const int t = wholeDegrees(w.tenths);
     if (s.waterLabel.empty()) {
-      snprintf(m.water, sizeof m.water, "%ld", t);
+      snprintf(m.water, sizeof m.water, "%d", t);
     } else {
-      snprintf(m.water, sizeof m.water, "%s %ld", s.waterLabel.c_str(), t);
+      snprintf(m.water, sizeof m.water, "%s %d", s.waterLabel.c_str(), t);
     }
   }
 
@@ -207,8 +205,7 @@ void buildModel(const App& app, ScreenModel& m) {
   // line, labelled, because a bare trailing "0%" did not say what it measured.
   if (app.current.valid) {
     snprintf(m.forecast, sizeof m.forecast, "%s %d/%d", wmoText(app.current.code),
-             static_cast<int>(lroundf(app.current.lo)),
-             static_cast<int>(lroundf(app.current.hi)));
+             app.current.lo, app.current.hi);
     m.forecastValid = true;
     if (app.current.rainPct >= 0) {
       // Clamp: it is a percentage, and a bogus API value must not render as
