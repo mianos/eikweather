@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <ctime>
 #include <string>
 
@@ -60,8 +61,15 @@ struct Reading {
       // gap is not a trend — say so instead of inventing one.
       trend = Trend::Unknown;
     } else {
-      const float thr = (deltaTenths < 1 ? 1 : deltaTenths) / 10.0f;
-      const float d = value - refValue;
+      // Compared in integer TENTHS, not floats. Two reasons, and the first is a
+      // real bug avoided: 17.3f - 17.2f is 0.100000381f, so a float `>= 0.1f`
+      // test misses genuine one-digit changes about half the time depending on
+      // which values you land on. Second, tenths are exactly what the screen
+      // draws, so this asks the same question the repaint logic asks — "did the
+      // number you can see change?" — rather than a second, subtly different one.
+      const long d =
+          lroundf(value * 10.0f) - lroundf(refValue * 10.0f);
+      const long thr = deltaTenths < 1 ? 1 : deltaTenths;
       trend = d >= thr    ? Trend::Rising
               : d <= -thr ? Trend::Falling
                           : Trend::Steady;

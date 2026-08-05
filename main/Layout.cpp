@@ -15,11 +15,12 @@
 //
 //      x=0    74                                     232  246
 //       +------+---------------------------------------+----+
-//  y=22 |  IN    ^                       2 1 . 4 °          |  label Font_Label
-//  y=34 |        |                     Font_Big, 32px       |  temp  BLACK
-//  y=60 |  OUT   |                        7 . 8 °           |
-//  y=72 |        v                     right-aligned x=232  |  temp  RED
-//            up if rising, down if falling, nothing otherwise
+//  y=22 |  IN    /\                     2 1 . 4 °           |  label Font_Label
+//  y=34 |                             Font_Big, 32px        |  temp  BLACK
+//  y=60 |  OUT   \/                        7 . 8 °          |
+//  y=72 |                             right-aligned x=232   |  temp  RED
+//            solid triangle: up if rising, down if falling,
+//            nothing at all if steady or not yet known
 //  y=76 |===================================================|  RED rule
 //  y=94 |  Partly cloudy 6/17                          48°  |  Font_Cond
 //  y=116|  Wed 5 Aug                            rain 10%    |  Font_Cond
@@ -62,9 +63,16 @@ constexpr int kLabelMaxW = 70;
 //
 // Bottom-aligned to the TEMPERATURE baseline, not the label's: the arrow modifies
 // the number, so it should sit on the same line as the number.
-constexpr int kArrowW = 21;    // odd: the stem lands on the exact centre column
-constexpr int kArrowH = 30;
+// A bare 23x12 triangle. Odd width, and the height is not a free choice — it is
+// w/2+1, which is what holds the edges at 45 degrees (see drawTrendArrow).
+constexpr int kArrowW = 23;
+constexpr int kArrowH = kArrowW / 2 + 1;
 constexpr int kArrowGap = 10;  // clearance on each side
+// The triangle is CENTRED on the digits' cap height, not stood on their baseline:
+// Font_Big's caps run 31px above the baseline, so a 12px mark sitting on the
+// baseline looks like it has slipped down. baseline - 10 puts its middle within a
+// pixel of the caps' middle.
+constexpr int kArrowLift = 10;
 
 constexpr int kSepY = 76;
 constexpr int kSepH = 3;
@@ -110,9 +118,9 @@ void drawReading(epd::Canvas& c, const char* label, int labelBaseline,
                   kDegreeR, colour);
 
   // Only a MOVING temperature gets a mark. Steady and Unknown both draw nothing:
-  // the arrow answers "is this going up or down", and an explicit "steady" glyph
-  // is a third symbol to learn for the one case where the number alone already
-  // says everything.
+  // the triangle answers "is this going up or down", and an explicit "steady"
+  // glyph is a third symbol to learn for the one case where the number alone
+  // already says everything.
   const int dir = trend == Trend::Rising ? 1 : trend == Trend::Falling ? -1 : 0;
   if (dir == 0) return;
 
@@ -123,7 +131,7 @@ void drawReading(epd::Canvas& c, const char* label, int labelBaseline,
       kTempRightX - epd::measureText(epd::Font_Big, temp).advance;
   if (arrowX + kArrowW + kArrowGap > tempLeft) return;
 
-  epd::drawTrendArrow(c, arrowX, tempBaseline, kArrowW, kArrowH, dir, colour);
+  epd::drawTrendArrow(c, arrowX, tempBaseline - kArrowLift, kArrowW, dir, colour);
 }
 
 void renderBanner(epd::Canvas& c, const ScreenModel& m) {

@@ -11,10 +11,10 @@ driver, the text renderer and the layout are local.
 
 ```
 ┌─────────────────────────────────────┐
-│  IN                       21.4°     │  Font_Big 44pt · BLACK
-│  OUT                       7.8°     │  RED
+│  IN     ▲                 21.4°     │  Font_Big 44pt · BLACK · rising
+│  OUT    ▼                  7.8°     │  RED · falling
 │═════════════════════════════════════│  RED rule
-│  Partly cloudy 6/17                 │  condition · today low/high
+│  Partly cloudy 6/17          48°    │  condition · low/high · water tank
 │  Wed 5 Aug              rain 10%    │  date · chance of rain
 └─────────────────────────────────────┘
 ```
@@ -26,6 +26,10 @@ so it costs one refresh a day. A time would cost one a minute.
 is `precipitation_probability_max`. The rain figure is **labelled** and on its own
 line because an unlabelled trailing `0%` on the forecast line was unreadable —
 nothing said what it was a percentage of.
+
+`48°` is the heat pump's hot water tank, from local MQTT. It is unlabelled and
+integer because that line is the tightest on the screen — see below. The
+triangles are a rise/fall mark on each reading, also below.
 
 **It is not a clock, deliberately.** See below.
 
@@ -77,45 +81,75 @@ Comparing formatted output beats a temperature-delta threshold: there is no
 threshold to tune, and it automatically accounts for rounding, the staleness
 fallback to `--`, and forecast text changes.
 
-## The rise / fall arrow
+## The rise / fall triangle
 
-Each reading gets an arrow in what used to be dead space between the label and
-the digits. **Only a moving temperature is marked** — rising or falling. Steady
-and "don't know yet" are both simply blank, because the arrow answers "which way
-is it going", and a third symbol for "it isn't" would be one more thing to learn
-for the one case where the number alone already says everything.
+Each reading gets a solid 23x12 triangle in what used to be dead space between the
+label and the digits — up if rising, down if falling. **Only a moving temperature
+is marked.** Steady and "don't know yet" are both simply blank, because the mark
+answers "which way is it going", and a third symbol for "it isn't" would be one
+more thing to learn for the case where the number alone already says everything.
 
 The trend compares the current reading against the one from `trend_win_min`
-(default 30) minutes ago, and only claims a direction once the move exceeds
-`trend_tenths` (default 0.3 degC). It comes from a **single anchor re-set once per
-window**, not a rolling comparison, and that bound is the point rather than a
-simplification: every change of the arrow costs a full ~20 s repaint, so a rolling
-comparison would flap across the threshold and burn a refresh each time. As built,
-each reading's arrow can change at most once per window.
+(default 10) minutes ago, and claims a direction once the move reaches
+`trend_tenths` (default **1** tenth = 0.1 degC). It comes from a **single anchor
+re-set once per window**, not a rolling comparison, so each reading's mark changes
+at most once per window.
+
+**Both of those numbers started out wrong** (3 tenths over 30 min) and the feature
+looked broken as a result: measured indoors, 0.3 degC per 30 min is a rare event,
+so both rows sat blank all afternoon while the visible digits changed. The
+reasoning behind the conservative values was also wrong — the fear was that a
+twitchy mark would cost refreshes, but the readings are drawn to a tenth, so
+`16.4` -> `16.5` already forces a repaint on its own. The mark rides along on
+repaints that were happening anyway. Hence one tenth (the smallest change the
+screen can display) over a window matching `min_interval_min` (no reason for the
+mark to move slower than the screen does).
+
+The comparison is done in **integer tenths**, not floats. `17.3f - 17.2f` is
+`0.100000381f`, so a float `>= 0.1f` test misses genuine one-digit changes
+depending on which values you land on. Integer tenths also ask exactly the question
+the repaint logic asks — "did the number you can see change?".
 
 Consequences worth knowing:
 
-- **No arrow for the first half hour after a reboot** — there is genuinely no
-  basis for one yet. `/healthz` separates the two blank cases that look identical
-  on screen: `inside_trend` is `unknown` vs `steady`, and
+- **No mark for the first `trend_win_min` after a reboot** — there is genuinely no
+  basis for one yet, so every OTA blanks both marks for 10 minutes. Do not read
+  anything into a blank column right after a flash; that is what made this look
+  broken during development. `/healthz` separates the two blank cases that are
+  identical on screen: `inside_trend` `unknown` vs `steady`, and
   `inside_trend_age_s` below `trend_win_min * 60` means "not enough history yet",
   not "sensor is dead".
 - **A gap longer than 3x the window resets to unknown** instead of comparing
-  across it. A publisher that went away for two hours, or SNTP stepping the clock
-  at boot, would otherwise manufacture a trend out of a meaningless difference.
-  This also means a sensor publishing less often than ~2x the window can never
-  resolve a trend — visible if you shorten `trend_win_min` below the publish
-  interval to test, which is exactly what happened to `home/temperature/outside`
-  (~6 min between messages) at `trend_win_min=1`.
-- `--` (stale or never seen) gets no arrow, so a dead sensor's last known
-  direction cannot sit on the glass indefinitely.
+  across it. A publisher that went away for hours, or SNTP stepping the clock at
+  boot, would otherwise manufacture a trend out of a meaningless difference. This
+  also means a sensor publishing less often than ~2x the window can never resolve
+  a trend — seen for real on `home/temperature/outside` (~6 min between messages)
+  while testing at `trend_win_min=1`.
+- `--` (stale or never seen) gets no mark, so a dead sensor's last known direction
+  cannot sit on the glass indefinitely.
 
-Both rows share **one** arrow column, derived from the wider of the two labels,
-so the arrows line up vertically. If a long custom label plus a wide reading
-(`LOUNGE` + `-12.4`) leaves no room, the arrow is dropped and the number keeps
-the space — it is the decoration, the temperature is the point. `tools/preview`
-asserts the column fits for the default labels rather than leaving it to be
-noticed on glass.
+### Why a bare triangle
+
+The first version was a stemmed arrow and it looked crude, for two reasons worth
+not repeating. The head height was chosen independently of its width, so the
+diagonals had to quantise (`hw = i * half / (headH - 1)`) and stepped unevenly —
+some rows widening by 1px, some by 2 — which on a 1-bit panel reads as a ragged
+edge. And at ~20px there is no stem width that looks right next to 44pt digits:
+thin looks spindly, thick looks blobby.
+
+So `drawTrendArrow` takes **no height parameter**. The height is `w/2 + 1`, the
+only ratio that holds the edges at exactly 45 degrees, one pixel per row. A bare
+triangle then has no thin features left to go ragged. Use an odd `w`.
+
+It is **centred on the digits' cap height**, not stood on their baseline: Font_Big's
+caps run 31px above the baseline, so a 12px mark sitting on the baseline looks like
+it has slipped.
+
+Both rows share **one** column, derived from the wider of the two labels, so the
+marks line up vertically. If a long custom label plus a wide reading (`LOUNGE` +
+`-12.4`) leaves no room, the mark is dropped and the number keeps the space — it is
+the decoration, the temperature is the point. `tools/preview` asserts the column
+fits for the default labels rather than leaving it to be noticed on glass.
 
 ## Hardware
 
@@ -270,7 +304,7 @@ plus:
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose — see below |
 | `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
-| `trend_win_min` / `trend_tenths` | `30` / `3` | rise/fall arrow window and 0.1 degC deadband |
+| `trend_win_min` / `trend_tenths` | `10` / `1` | rise/fall window, and deadband in tenths of a degree |
 | `water_topic` / `water_field` | `""` / `temperature` | optional third reading; empty => not drawn at all |
 | `water_label` | `""` | empty on purpose — a label truncates the forecast, see below |
 | `min_interval_min` | `10` | rate-limits repaints, clamped to >=3 |

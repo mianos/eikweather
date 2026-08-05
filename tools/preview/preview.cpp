@@ -35,9 +35,10 @@ constexpr int kOutsideLabelBaseline = 60;
 constexpr int kOutsideTempBaseline = 72;
 constexpr int kFcBaseline = 94;
 constexpr int kDateBaseline = 116;
-constexpr int kArrowW = 21;
-constexpr int kArrowH = 30;
+constexpr int kArrowW = 23;
+constexpr int kArrowH = kArrowW / 2 + 1;  // 45-degree edges fix the height
 constexpr int kArrowGap = 10;
+constexpr int kArrowLift = 10;
 
 class MemCanvas final : public epd::Canvas {
  public:
@@ -199,15 +200,17 @@ int main() {
     printf("  %-20s x=%d..%d  widest number starts at %d  %s\n", "IN/OUT labels",
            arrowX, arrowX + kArrowW, tempLeft,
            ok ? "ok" : "*** ARROW WILL BE DROPPED ***");
-    // Vertical: the arrow is bottom-aligned to the temperature baseline, so it
-    // reaches kArrowH-1 above it. It must not climb into the row above.
-    const int top = kInsideTempBaseline - kArrowH + 1;
-    const bool vok = top >= 0 && kOutsideTempBaseline - kArrowH + 1 >
+    // Vertical: the triangle is centred on the cap height, so its bottom sits
+    // kArrowLift above the baseline and it reaches kArrowH-1 further up. It must
+    // stay inside the panel and must not climb into the row above.
+    const int top = kInsideTempBaseline - kArrowLift - kArrowH + 1;
+    const bool vok = top >= 0 && kOutsideTempBaseline - kArrowLift - kArrowH + 1 >
                                      kInsideTempBaseline;
     if (!vok) ++fails;
     printf("  %-20s inside y=[%d..%d] outside y=[%d..%d] %s\n", "vertical",
-           top, kInsideTempBaseline, kOutsideTempBaseline - kArrowH + 1,
-           kOutsideTempBaseline, vok ? "ok" : "*** ARROWS COLLIDE ***");
+           top, kInsideTempBaseline - kArrowLift,
+           kOutsideTempBaseline - kArrowLift - kArrowH + 1,
+           kOutsideTempBaseline - kArrowLift, vok ? "ok" : "*** ARROWS COLLIDE ***");
   }
 
   struct Case { const char* name; ScreenModel m; };

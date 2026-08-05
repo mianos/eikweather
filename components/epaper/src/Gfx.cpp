@@ -208,30 +208,19 @@ void drawDegree(Canvas& c, int cx, int cy, int r, Color col) {
   }
 }
 
-void drawTrendArrow(Canvas& c, int x, int bottomY, int w, int h, int dir,
-                    Color col) {
-  if (w < 5 || h < 5 || dir == 0) return;
+void drawTrendArrow(Canvas& c, int x, int bottomY, int w, int dir, Color col) {
+  if (w < 5 || dir == 0) return;
 
-  // Stem thickness, forced ODD so it is symmetric about the centre column.
-  int t = h / 7;
-  if (t < 3) t = 3;
-  t |= 1;
-
-  const int top = bottomY - h + 1;
-  const int headH = (h * 5) / 9;
   const int half = w / 2;
+  const int cx = x + half;
+  const int h = half + 1;  // 45 degrees: half-width grows exactly 1px per row
+  const int top = bottomY - h + 1;
 
-  // Filled triangle head, row i counted from the APEX (which is at the top for
-  // an up arrow and at the bottom for a down arrow) so the same loop draws both.
-  for (int i = 0; i < headH; ++i) {
-    const int hw = (i * half) / (headH - 1);
+  // Row i counted from the APEX — top when pointing up, bottom when pointing
+  // down — so one loop draws both directions.
+  for (int i = 0; i < h; ++i) {
     const int y = dir > 0 ? top + i : bottomY - i;
-    drawHLine(c, x + half - hw, y, hw * 2 + 1, col);
-  }
-
-  const int stemH = h - headH;
-  if (stemH > 0) {
-    fillRect(c, x + half - t / 2, dir > 0 ? top + headH : top, t, stemH, col);
+    drawHLine(c, cx - i, y, i * 2 + 1, col);
   }
 }
 

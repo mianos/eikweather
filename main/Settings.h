@@ -66,15 +66,28 @@ struct Settings : SettingsBase {
 
   // --- rise / fall arrow ------------------------------------------------
   // The arrow compares the current reading against the one from trendWinMin ago,
-  // and only claims a direction once the move exceeds trendTenths tenths of a
-  // degree. Both are deliberately coarse: this is a "is it warming up or cooling
-  // down" glance, and every change of the arrow costs a full ~20 s repaint, so a
-  // twitchy indicator would be worse than none.
+  // and claims a direction once the move exceeds trendTenths tenths of a degree.
   //
-  // Consequence of the 30 min window: no arrow for the first half hour after a
-  // reboot. That is intentional — see Trend::Unknown.
-  int trendWinMin = 30;
-  int trendTenths = 3;  // 0.3 degC
+  // trendTenths is ONE tenth: the smallest change the screen can show, since the
+  // big readings are drawn at %.1f. So the rule is simply "if the number you can
+  // see moved, the arrow says which way", and only a completely unchanged digit
+  // reads as steady (which draws nothing).
+  //
+  // This started at 3 tenths over 30 min and that was wrong. Measured indoors,
+  // 0.3 degC per 30 min is a rare event, so both rows sat blank all afternoon while
+  // the visible digits changed — indistinguishable from the feature being broken.
+  //
+  // The reasoning that produced those numbers — that a twitchy arrow would cost
+  // refreshes — was also wrong. The readings are drawn to a tenth, so "16.4" ->
+  // "16.5" already forces a repaint on its own; the arrow rides along on repaints
+  // that were happening anyway. Hence the window matching minIntervalMin: there is
+  // no reason for the arrow to move slower than the screen does.
+  //
+  // Consequence of the window: no arrow for the first trendWinMin after a reboot
+  // (see Trend::Unknown). Every OTA therefore blanks the arrows for 10 minutes —
+  // do not read anything into a blank column right after a flash.
+  int trendWinMin = 10;
+  int trendTenths = 1;  // 0.1 degC — one displayed digit
 
   // --- refresh cadence --------------------------------------------------
   // This is a WEATHER display, not a clock: it repaints only when the drawn

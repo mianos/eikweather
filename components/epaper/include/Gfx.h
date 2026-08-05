@@ -63,13 +63,18 @@ void drawLine(Canvas&, int x0, int y0, int x1, int y1, Color);  // Bresenham
 // get U+00B0 would pull in ~130 junk glyphs.
 void drawDegree(Canvas&, int cx, int cy, int r, Color);
 
-// A solid trend arrow: triangular head plus a stem, drawn in the box whose
-// bottom-left corner is (x, bottomY) — bottomY so it can be passed a text
-// BASELINE and sit on the same line as the digits beside it.
+// A solid trend triangle, pointing up (dir > 0) or down (dir < 0); dir == 0 draws
+// nothing. Bottom-left corner at (x, bottomY), bottom-anchored so a caller can
+// position it against a text baseline.
 //
-// dir > 0 points up, dir < 0 down, dir == 0 draws nothing. The head is w+1 px
-// across, since it is symmetric about x + w/2. Prefer an odd w so the stem lands
-// exactly on the centre column.
-void drawTrendArrow(Canvas&, int x, int bottomY, int w, int h, int dir, Color);
+// There is deliberately NO height parameter. The height is w/2 + 1, which is what
+// keeps the diagonals at exactly 45 degrees — the only slope that quantises evenly
+// on a 1-bit panel, where anything else steps 1,2,1,2... and looks ragged. Use an
+// ODD w so the shape is exactly w px across and symmetric about its apex.
+//
+// A bare triangle rather than a stemmed arrow: at ~20px there is no room for a
+// stem that does not look spindly next to 44pt digits, and a triangle has no thin
+// features to go ragged at all.
+void drawTrendArrow(Canvas&, int x, int bottomY, int w, int dir, Color);
 
 }  // namespace epd
