@@ -1,4 +1,4 @@
-# einkclock
+# einkweather
 
 Indoor/outdoor temperature and forecast on a Lonely Binary ESP32 e-ink board
 (2.13" tri-colour, 250×122, SSD1680). ESP-IDF v6.0.1, target `esp32`.
@@ -114,7 +114,7 @@ dependencies on the first build.
 ```sh
 ./build.sh                                  # sets target esp32 on first run
 ./flash.sh                                  # PORT=/dev/cu.usbserial-XXXX to override
-curl --data-binary @build/einkclock.bin http://einkclock.local/firmware   # OTA
+curl --data-binary @build/einkweather.bin http://einkweather.local/firmware   # OTA
 ```
 
 `dependencies.lock` **is committed** on purpose: the mianesp deps use
@@ -173,7 +173,7 @@ Base routes from mianesp's `WebServer`: `POST /reset`, `POST /set_hostname`,
 | `GET /config` | all settings as JSON |
 | `POST /config` | apply any subset; panel tunables take effect immediately |
 | `POST /config/reset` | defaults; `{"wifi":true}` also clears credentials |
-| `POST /refresh` | repaint now instead of waiting for the boundary |
+| `POST /refresh` | repaint now instead of waiting for the rate limit |
 | `POST /test` | `{"pattern":"black"\|"white"\|"calib"\|"colors"\|"rot"}` |
 | `GET /screen.pbm` | dump the framebuffer as PBM |
 | `POST /firmware` | push-OTA, raw `.bin` body |
@@ -199,7 +199,6 @@ plus:
 |---|---|---|
 | `latitude` / `longitude` | `-33.8688` / `151.2093` | **strings**, passed verbatim to Open-Meteo |
 | `tz` | `AEST-10AEDT,M10.1.0,M4.1.0/3` | POSIX TZ |
-| `refresh_min` | `5` | clamped to a divisor of 60 |
 | `inside_topic` / `inside_field` / `inside_label` | `""` / `temperature` / `IN` | empty topic => shows `--` |
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose — see below |
 | `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
@@ -246,7 +245,7 @@ were *inferred* from GxEPD2 rather than read from a datasheet, and now are not.
 | 5 · rotation | `rotation=3` (Landscape270) correct first try ✓ |
 | 6 · red plane | `invert_red=0` correct — red renders red ✓ |
 | 8 · integration | weather HTTP 200 over TLS (CMN bundle is sufficient); OTA into `ota_1` ✓ |
-| 9 · cadence | paints at 09:10 / 09:15 / 09:20, each completing 1-2 s before its boundary ✓ |
+| 9 · cadence | repaints on content change only, rate-limited; verified against the live board ✓ |
 
 That also validates the three SSD1680 init bytes taken from GxEPD2 (`0x3C`=0x05,
 `0x21` byte B=0x80, `0x22`=0xF7) and the `0x4E`/`0x4F` counter re-home between the
@@ -298,18 +297,17 @@ dependency:
 
 | Face | Font | Size | Glyphs | Data |
 |---|---|---|---|---|
-| `Font_Clock` | Arial Bold | 92 pt | 11 (`0`–`:`) | 3.6 KB |
-| `Font_Temp` | Arial Bold | 38 pt | 13 (`-`–`9`) | 0.6 KB |
-| `Font_Date` | Arial Bold | 24 pt | 95 | 2.1 KB |
+| `Font_Big` | Arial Bold | 44 pt | 13 (`-`–`9`) | 0.9 KB |
+| `Font_Label` | Arial Bold | 24 pt | 95 | 2.1 KB |
 | `Font_Cond` | Arial | 20 pt | 95 | 1.4 KB |
 
 9,445 bytes total, confirmed in `.rodata` (flash), 0 in DRAM.
 
-The clock size was chosen by measurement. Height is the binding constraint, not
-width, so a condensed face is the wrong trade: Arial Narrow Bold at 88 pt measured
-only 184 px for `"23:59"`, wasting 60 px of the 244 px budget. Arial Bold at 92 pt
-is 235 px at the same 67 px figure height — same vertical footprint, much heavier
-strokes.
+Sizes are chosen by measurement, not from metrics tables. `Font_Big` is 44 pt
+because the forecast and the date each need a full-width line: the widest date is
+113 px and the widest forecast 245 px against a 246 px line, so sharing one line
+always truncates one of them. 52 pt figures (38 px) left room for only one small
+line; 44 pt (32 px) buys two.
 
 Tables must stay `const` and live in exactly **one** translation unit; including a
 font header from two `.cpp` files duplicates the data into RAM.
@@ -334,27 +332,23 @@ instead of wedging the task forever.
 task; blocking it for 19 s would stall every software timer in the system,
 including inside lwIP and Wi-Fi.
 
-**Alignment uses local minute-of-hour, not epoch arithmetic.**
-`((now/period)+1)*period` happens to coincide with local :00/:05/… for every real
-timezone, because all offsets are multiples of 15 minutes — but it breaks for a
-period that doesn't divide 15 (a 4-minute period at UTC+05:45). The `tm_min` form
-is correct for any period dividing 60 and is inherently DST-safe.
-
 **Fetch then render, strictly sequential.** `Weather` has exactly one writer, so no
 mutex and no torn reads; the TLS handshake's 25–45 KB is fully freed before the
 panel work starts, so the two largest memory peaks never coexist on a 320 KB part;
 and the fetch result is known before anything is drawn, so the stale indicator
 comes from fact rather than a race.
 
-**Never draw a wrong time.** Nothing calls `strftime` for display until
-`time(nullptr) >= 1700000000`. A blank clock area beats `12:00 1 Jan 1970` burned
-into e-paper for five minutes.
+**Never draw a wrong date.** Nothing formats the date until
+`time(nullptr) >= 1700000000`; the line is simply absent until SNTP has synced. A
+blank line beats `1 Jan 1970` burned into e-paper. SNTP matters even with no clock
+on screen: mbedTLS needs a plausible time to validate the Open-Meteo certificate.
 
-**A failed weather fetch never costs you the clock.** One attempt per cycle, 8 s
-timeout, no retry; the previous reading is preserved and the render proceeds. The
-device never reboots over a weather failure. Staleness shows as a dashed rule,
-which costs zero layout space — hence no status footer.
-
+**A failed weather fetch never costs you the temperatures.** Those come from MQTT
+and are independent. One attempt per cycle with an 8 s timeout; the previous
+forecast is preserved, and a FAILED fetch retries after 60 s rather than waiting
+the full `weather_poll_min` — the first attempt after boot reliably loses a race
+with the network and returns `ESP_ERR_HTTP_CONNECT`. The
+device never reboots over a weather failure. 
 **HTTPS via the IDF cert bundle**, not plain HTTP. mianesp's `HttpClient` has no
 `crt_bundle_attach` and physically cannot do TLS, so `WeatherClient` calls
 `esp_http_client` directly rather than patching a component six other projects
@@ -374,4 +368,4 @@ owns would double-free.
 - **Battery display** from GPIO35, and the **button** (needs an external pull-up).
 - A **24-hour soak**: watch `heap_min` for a monotonic downward trend (the TLS/HTTP
   path is the likeliest place for a leak), any `busy_timeouts`, and drift of the
-  displayed minute away from the boundary.
+  displayed values going stale without the `--` fallback engaging.

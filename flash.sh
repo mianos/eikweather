@@ -5,5 +5,5 @@ set -e
 set -o pipefail
 export IDF_PATH=/Users/robertfowler/.espressif/v6.0.1/esp-idf
 . "$IDF_PATH/export.sh" >/dev/null 2>&1
-cd /Users/robertfowler/walocal/einkclock
+cd "$(dirname "$0")"   # path-relative: survives a project rename
 idf.py -p "${PORT:-/dev/cu.usbserial-1440}" flash monitor

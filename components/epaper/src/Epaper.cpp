@@ -385,7 +385,7 @@ esp_err_t Panel::hibernate() {
 void Panel::writePbm(void* ctx, void (*emit)(void*, const char*, size_t)) const {
   char hdr[64];
   const int w = width(), h = height();
-  int n = snprintf(hdr, sizeof hdr, "P1\n# einkclock framebuffer\n%d %d\n", w, h);
+  int n = snprintf(hdr, sizeof hdr, "P1\n# einkweather framebuffer\n%d %d\n", w, h);
   emit(ctx, hdr, static_cast<size_t>(n));
 
   // P1 is monochrome, so red renders as ink (1) alongside black — this dump is

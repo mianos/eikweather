@@ -192,7 +192,7 @@ int main() {
                      "Heavy drizzle 2/11", "Sat 12 Jul", "rain 90%"));
   {
     Case c{"banner", {}};
-    c.m.banner = "einkclock";
+    c.m.banner = "einkweather";
     c.m.banner2 = "Run ESP-Touch v2 to set up Wi-Fi";
     cases.push_back(c);
   }

@@ -3,7 +3,7 @@
 
 #include "SettingsBase.h"
 
-// einkclock settings schema. The persistence / reset / log / onChange machinery
+// einkweather settings schema. The persistence / reset / log / onChange machinery
 // lives in mianesp's settingsbase (everything is stored as ONE JSON blob under a
 // single NVS key). Member initialisers are the compiled-in defaults, which
 // resetToDefaults() restores.
@@ -12,7 +12,7 @@
 // unsigned. Booleans are modelled as 0/1 ints.
 struct Settings : SettingsBase {
   // --- identity / time --------------------------------------------------
-  std::string sensorName = "einkclock";
+  std::string sensorName = "einkweather";
   std::string tz = "AEST-10AEDT,M10.1.0,M4.1.0/3";  // POSIX TZ, Sydney
   std::string ntpServer = "pool.ntp.org";
 

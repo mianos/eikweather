@@ -1,4 +1,4 @@
-// einkclock — Lonely Binary ESP32 e-ink board: 2.13" tri-colour SSD1680 showing
+// einkweather — Lonely Binary ESP32 e-ink board: 2.13" tri-colour SSD1680 showing
 // indoor and outdoor temperature from local MQTT, plus an Open-Meteo forecast.
 //
 // THE CONSTRAINT THAT SHAPES EVERYTHING: this tri-colour panel has no partial
@@ -18,7 +18,7 @@
 #include <ctime>
 
 #include "App.h"
-#include "ClockWebServer.h"
+#include "WebApi.h"
 #include "Epaper.h"
 #include "Gfx.h"
 #include "MqttClient.h"
@@ -43,7 +43,7 @@
 
 namespace {
 
-constexpr char TAG[] = "einkclock";
+constexpr char TAG[] = "einkweather";
 
 constexpr gpio_num_t kLedPin = GPIO_NUM_2;      // lit while the panel refreshes
 constexpr gpio_num_t kButtonPin = GPIO_NUM_34;  // probed only; no pull-up on this board
@@ -448,12 +448,12 @@ extern "C" void app_main(void) {
 
   if (settings.enableWeb) {
     static WebContext webctx(&wifi);
-    static ClockWebServer web(&webctx, settings, app, s_displayTask);
+    static WebApi web(&webctx, settings, app, s_displayTask);
     ESP_ERROR_CHECK(web.start());
   } else {
     ESP_LOGW(TAG, "web server disabled (enable_web=0)");
   }
 
-  ESP_LOGI(TAG, "einkclock started; free heap %u",
+  ESP_LOGI(TAG, "einkweather started; free heap %u",
            static_cast<unsigned>(esp_get_free_heap_size()));
 }

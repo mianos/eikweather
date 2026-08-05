@@ -1,4 +1,4 @@
-#include "ClockWebServer.h"
+#include "WebApi.h"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr char TAG[] = "clockweb";
+constexpr char TAG[] = "webapi";
 
 // /config bodies are tiny — bound the input so a hostile Content-Length cannot
 // trigger a huge std::string allocation. (Pattern copied from ws-voice's
@@ -49,7 +49,7 @@ void pbmEmit(void* ctx, const char* data, size_t len) {
 
 }  // namespace
 
-esp_err_t ClockWebServer::start() {
+esp_err_t WebApi::start() {
   esp_err_t r = WebServer::start();
   if (r != ESP_OK) return r;
 
@@ -87,7 +87,7 @@ esp_err_t ClockWebServer::start() {
   return ESP_OK;
 }
 
-void ClockWebServer::populate_healthz_fields(WebContext*, JsonWrapper& json) {
+void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   const esp_app_desc_t* desc = esp_app_get_description();
   const esp_partition_t* running = esp_ota_get_running_partition();
   json.AddItem("version", std::string(desc->version));
@@ -151,8 +151,8 @@ void ClockWebServer::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("local_time", std::string(localNow));
 }
 
-esp_err_t ClockWebServer::config_get_handler(httpd_req_t* req) {
-  auto* self = static_cast<ClockWebServer*>(req->user_ctx);
+esp_err_t WebApi::config_get_handler(httpd_req_t* req) {
+  auto* self = static_cast<WebApi*>(req->user_ctx);
   JsonWrapper resp = self->settings_.toJson();
   return send_json(req, resp);
 }
@@ -160,8 +160,8 @@ esp_err_t ClockWebServer::config_get_handler(httpd_req_t* req) {
 // POST /config — apply any subset of the settings keys, persist, return the new
 // full settings. The panel tunables take effect immediately via onChange hooks
 // registered in main.cpp, which also kick the display task to repaint.
-esp_err_t ClockWebServer::config_post_handler(httpd_req_t* req) {
-  auto* self = static_cast<ClockWebServer*>(req->user_ctx);
+esp_err_t WebApi::config_post_handler(httpd_req_t* req) {
+  auto* self = static_cast<WebApi*>(req->user_ctx);
   if (req->content_len > kMaxJsonBodyBytes)
     return sendJsonError(req, 413, "request body too large");
   std::string body = read_request_body(req);
@@ -180,8 +180,8 @@ esp_err_t ClockWebServer::config_post_handler(httpd_req_t* req) {
 // POST /config/reset — restore every setting to its default and persist.
 // Optional body {"wifi": true} also clears Wi-Fi credentials, rebooting into
 // ESP-Touch v2 provisioning.
-esp_err_t ClockWebServer::config_reset_post_handler(httpd_req_t* req) {
-  auto* self = static_cast<ClockWebServer*>(req->user_ctx);
+esp_err_t WebApi::config_reset_post_handler(httpd_req_t* req) {
+  auto* self = static_cast<WebApi*>(req->user_ctx);
 
   bool wipe_wifi = false;
   if (req->content_len > 0) {
@@ -216,8 +216,8 @@ esp_err_t ClockWebServer::config_reset_post_handler(httpd_req_t* req) {
 
 // POST /refresh — wake the display task immediately. Without this every bring-up
 // experiment costs up to a full refresh period.
-esp_err_t ClockWebServer::refresh_post_handler(httpd_req_t* req) {
-  auto* self = static_cast<ClockWebServer*>(req->user_ctx);
+esp_err_t WebApi::refresh_post_handler(httpd_req_t* req) {
+  auto* self = static_cast<WebApi*>(req->user_ctx);
   if (self->displayTask_) xTaskNotifyGive(self->displayTask_);
   JsonWrapper resp;
   resp.AddItem("status", std::string("refresh queued"));
@@ -226,8 +226,8 @@ esp_err_t ClockWebServer::refresh_post_handler(httpd_req_t* req) {
 
 // POST /test {"pattern":"black"|"white"|"calib"|"colors"|"rot"} — draws a bring-up
 // pattern on the next wake. See the bring-up stages in README.md.
-esp_err_t ClockWebServer::test_post_handler(httpd_req_t* req) {
-  auto* self = static_cast<ClockWebServer*>(req->user_ctx);
+esp_err_t WebApi::test_post_handler(httpd_req_t* req) {
+  auto* self = static_cast<WebApi*>(req->user_ctx);
   if (req->content_len > kMaxJsonBodyBytes)
     return sendJsonError(req, 413, "request body too large");
   std::string body = read_request_body(req);
@@ -259,8 +259,8 @@ esp_err_t ClockWebServer::test_post_handler(httpd_req_t* req) {
 
 // GET /screen.pbm — what the device THINKS it drew. Separates a layout bug from a
 // panel bug without a camera.
-esp_err_t ClockWebServer::screen_get_handler(httpd_req_t* req) {
-  auto* self = static_cast<ClockWebServer*>(req->user_ctx);
+esp_err_t WebApi::screen_get_handler(httpd_req_t* req) {
+  auto* self = static_cast<WebApi*>(req->user_ctx);
   httpd_resp_set_type(req, "image/x-portable-bitmap");
   self->app_.panel->writePbm(req, pbmEmit);
   return httpd_resp_send_chunk(req, nullptr, 0);  // terminate the chunked response
@@ -268,8 +268,8 @@ esp_err_t ClockWebServer::screen_get_handler(httpd_req_t* req) {
 
 // POST /firmware — raw .bin body streamed into the inactive OTA slot, which is
 // then set as the next boot partition, followed by a reboot.
-// Deploy: curl --data-binary @build/einkclock.bin http://<host>/firmware
-esp_err_t ClockWebServer::firmware_post_handler(httpd_req_t* req) {
+// Deploy: curl --data-binary @build/einkweather.bin http://<host>/firmware
+esp_err_t WebApi::firmware_post_handler(httpd_req_t* req) {
   const esp_partition_t* target = esp_ota_get_next_update_partition(nullptr);
   if (!target) return sendJsonError(req, 500, "no OTA partition available");
   if (req->content_len <= 0)
@@ -322,7 +322,7 @@ esp_err_t ClockWebServer::firmware_post_handler(httpd_req_t* req) {
 // restart. mianesp's base WebServer offers POST /reset, but that CLEARS Wi-FI
 // CREDENTIALS and reboots into provisioning, which is not what you want after
 // merely editing a topic.
-esp_err_t ClockWebServer::reboot_post_handler(httpd_req_t* req) {
+esp_err_t WebApi::reboot_post_handler(httpd_req_t* req) {
   JsonWrapper resp;
   resp.AddItem("status", std::string("rebooting"));
   esp_err_t r = send_json(req, resp);

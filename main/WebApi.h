@@ -14,9 +14,9 @@
 //   GET  /screen.pbm   dump the framebuffer, separating "layout is wrong" from
 //                      "panel is wrong"
 //   GET/POST /config   the seven panel tunables, changeable without a reflash
-class ClockWebServer : public WebServer {
+class WebApi : public WebServer {
  public:
-  ClockWebServer(WebContext* ctx, Settings& settings, App& app,
+  WebApi(WebContext* ctx, Settings& settings, App& app,
                  TaskHandle_t displayTask)
       : WebServer(ctx), settings_(settings), app_(app), displayTask_(displayTask) {}
 
