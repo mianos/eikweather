@@ -58,7 +58,7 @@ esp_err_t ClockWebServer::start() {
     httpd_method_t method;
     esp_err_t (*handler)(httpd_req_t*);
   };
-  const std::array<Route, 7> routes = {{
+  const std::array<Route, 8> routes = {{
       {"/config", HTTP_GET, config_get_handler},
       {"/config", HTTP_POST, config_post_handler},
       {"/config/reset", HTTP_POST, config_reset_post_handler},
@@ -66,6 +66,7 @@ esp_err_t ClockWebServer::start() {
       {"/test", HTTP_POST, test_post_handler},
       {"/screen.pbm", HTTP_GET, screen_get_handler},
       {"/firmware", HTTP_POST, firmware_post_handler},
+      {"/reboot", HTTP_POST, reboot_post_handler},
   }};
 
   for (const Route& route : routes) {
@@ -110,6 +111,7 @@ void ClockWebServer::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("weather_failures",
                static_cast<int>(app_.weather->consecutiveFailures()));
   json.AddItem("weather_status", app_.weather->lastStatus());
+  json.AddItem("weather_error", std::string(app_.weather->lastError()));
   json.AddItem("wmo_code", app_.current.code);
   json.AddItem("wmo_text", std::string(wmoText(app_.current.code)));
   json.AddItem("lo", app_.current.lo);
@@ -309,6 +311,23 @@ esp_err_t ClockWebServer::firmware_post_handler(httpd_req_t* req) {
   esp_err_t r = send_json(req, resp);
   ESP_LOGW(TAG, "OTA complete, rebooting into %s", target->label);
   vTaskDelay(pdMS_TO_TICKS(500));
+  esp_restart();
+  return r;
+}
+
+// POST /reboot — a plain restart.
+//
+// Needed because MQTT subscriptions are established once, in Sensors::attach()
+// during app_main, so changing inside_topic/outside_topic takes effect only on
+// restart. mianesp's base WebServer offers POST /reset, but that CLEARS Wi-FI
+// CREDENTIALS and reboots into provisioning, which is not what you want after
+// merely editing a topic.
+esp_err_t ClockWebServer::reboot_post_handler(httpd_req_t* req) {
+  JsonWrapper resp;
+  resp.AddItem("status", std::string("rebooting"));
+  esp_err_t r = send_json(req, resp);
+  ESP_LOGW(TAG, "reboot requested over HTTP");
+  vTaskDelay(pdMS_TO_TICKS(500));  // let the response flush
   esp_restart();
   return r;
 }

@@ -31,11 +31,16 @@ class WeatherClient {
 
   uint32_t consecutiveFailures() const { return failures_; }
   int lastStatus() const { return lastStatus_; }
+  // esp_err_to_name of the last perform(), or a parse-stage reason. A status of 0
+  // with a non-empty error here means it never reached HTTP at all (DNS, TLS,
+  // timeout), which is a completely different problem from a 4xx.
+  const char* lastError() const { return lastError_; }
 
  private:
   const Settings& settings_;
   uint32_t failures_ = 0;
   int lastStatus_ = 0;
+  const char* lastError_ = "";
 };
 
 // WMO weather_code -> a short display string. Empty for unknown codes.

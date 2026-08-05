@@ -179,6 +179,15 @@ void buildModel(const App& app, ScreenModel& m) {
   }
 }
 
+// Is the screen showing everything it is meant to? Used to let the very first
+// complete picture through immediately: at boot the MQTT readings arrive within
+// a second (the topics are retained) but the forecast needs DNS, TLS and often a
+// retry, so without this exception the panel sits on "forecast unavailable" for a
+// full min_interval_min. One extra refresh per boot is nothing against panel life.
+bool complete(const ScreenModel& m) {
+  return m.insideValid && m.outsideValid && strstr(m.forecast, "unavailable") == nullptr;
+}
+
 // Everything that is actually drawn. Comparing this is what decides whether a
 // repaint is worth 20+ seconds of flashing — far more robust than a temperature
 // delta threshold, because it is exactly the question "would the screen differ?".
@@ -228,8 +237,15 @@ void displayTask(void* arg) {
 
   ScreenModel drawn;      // what is physically on the glass
   bool everPainted = false;
+  bool everComplete = false;  // has a full picture ever been drawn?
   int64_t lastPaintUs = 0;
   int64_t lastWeatherUs = 0;
+  bool weatherOk = false;
+
+  // A FAILED fetch must be retried far sooner than the success interval. The
+  // first attempt often loses a race with DNS coming up, and waiting the full
+  // weather_poll_min after that leaves the forecast line blank for 15 minutes.
+  constexpr int64_t kWeatherRetryUs = 60LL * 1000000;
 
   for (;;) {
     const int64_t nowUs = esp_timer_get_time();
@@ -238,9 +254,12 @@ void displayTask(void* arg) {
     const int64_t weatherPeriodUs =
         static_cast<int64_t>(s.weatherPollMin < 1 ? 1 : s.weatherPollMin) * 60 *
         1000000;
-    if (lastWeatherUs == 0 || nowUs - lastWeatherUs >= weatherPeriodUs) {
+    const int64_t weatherDueUs = weatherOk ? weatherPeriodUs : kWeatherRetryUs;
+    if (lastWeatherUs == 0 || nowUs - lastWeatherUs >= weatherDueUs) {
+      // Gate on a plausible clock: mbedTLS cannot validate the certificate
+      // without one, so attempting earlier just burns a guaranteed failure.
       if (time(nullptr) >= kPlausibleTime) {
-        app.weather->fetch(app.current);
+        weatherOk = app.weather->fetch(app.current);
         lastWeatherUs = nowUs;
       }
     }
@@ -273,12 +292,16 @@ void displayTask(void* arg) {
     const bool changed = !everPainted || !sameAsDrawn(want, drawn);
     const int64_t sinceUs = nowUs - lastPaintUs;
     const int64_t minUs = static_cast<int64_t>(s.minIntervalSec()) * 1000000;
-    const bool allowed = !everPainted || sinceUs >= minUs;
+    // The rate limit is bypassed exactly twice per boot: for the first paint of
+    // any kind, and for the first paint that has all the data.
+    const bool firstComplete = !everComplete && complete(want);
+    const bool allowed = !everPainted || firstComplete || sinceUs >= minUs;
 
     if (changed && allowed) {
       paint(app, want);
       drawn = want;
       everPainted = true;
+      if (complete(want)) everComplete = true;
       lastPaintUs = esp_timer_get_time();
       app.lastStackHighWater =
           static_cast<int32_t>(uxTaskGetStackHighWaterMark(nullptr));
@@ -301,7 +324,8 @@ void displayTask(void* arg) {
     if (changed && !allowed) {
       waitUs = minUs - sinceUs;  // a change is pending; wake when allowed
     } else {
-      waitUs = weatherPeriodUs - (esp_timer_get_time() - lastWeatherUs);
+      const int64_t due = weatherOk ? weatherPeriodUs : kWeatherRetryUs;
+      waitUs = due - (esp_timer_get_time() - lastWeatherUs);
     }
     if (waitUs < 1000000) waitUs = 1000000;
     if (waitUs > 30LL * 1000000) waitUs = 30LL * 1000000;
@@ -372,11 +396,20 @@ extern "C" void app_main(void) {
                           "border", "src_mode", "update_mode"}) {
     settings.onChange(key, reconfigure);
   }
-  // Anything that changes what is drawn or how often.
+  // Anything that changes what is drawn or how often — takes effect immediately.
   for (const char* key : {"inside_label", "outside_label", "sensor_stale_min",
                           "min_interval_min", "weather_poll_min"}) {
     settings.onChange(key, [] {
       if (s_displayTask) xTaskNotifyGive(s_displayTask);
+    });
+  }
+  // MQTT subscriptions are established once in Sensors::attach() below, and
+  // MqttClient has no way to REMOVE a handler binding, so re-pointing a topic
+  // means a restart. Say so rather than leaving it silently ineffective.
+  for (const char* key : {"mqtt_server", "mqtt_port", "inside_topic",
+                          "inside_field", "outside_topic", "outside_field"}) {
+    settings.onChange(key, [] {
+      ESP_LOGW(TAG, "MQTT settings changed — POST /reboot to apply");
     });
   }
 

@@ -124,6 +124,36 @@ driver's own `nvs.net80211` namespace, not in the settings blob.
 
 `POST /config/reset` with `{"wifi":true}` clears them and reboots into provisioning.
 
+## MQTT sources
+
+Node-RED decodes Zigbee sensors off `tele/zigbridge/SENSOR` and republishes them
+to **retained** topics (QoS 1), so this display gets a value the instant it
+subscribes rather than waiting for the next sensor report:
+
+| Topic | Source |
+|---|---|
+| `home/temperature/lounge` | Zigbee `0xD1EB` — the indoor reading |
+| `home/temperature/outside` | Zigbee `0x8C4D` |
+| `home/temperature/office`, `.../bedroom` | also published, not used here |
+
+Payloads are `{"temperature":15.3,"unit":"C","timestamp":"..."}` — flat JSON with
+a named numeric field, matching the rest of this broker (`tele/ldr/lux` publishes
+`{"lux":71.2682,...}`). That is also the only shape mianesp's `MqttClient` can
+express, since it hands handlers a parsed `JsonWrapper`.
+
+```sh
+curl -X POST http://<host>/config -d '{
+  "inside_topic":  "home/temperature/lounge",  "inside_field":  "temperature",
+  "outside_topic": "home/temperature/outside", "outside_field": "temperature"}'
+curl -X POST http://<host>/reboot
+```
+
+**The reboot is required.** Subscriptions are established once in
+`Sensors::attach()` at startup, and `MqttClient` has no way to remove a handler
+binding, so re-pointing a topic cannot take effect in place. Changing one logs
+"MQTT settings changed — POST /reboot to apply". Note mianesp's base
+`POST /reset` is *not* a reboot: it clears Wi-Fi credentials.
+
 ## HTTP API
 
 Base routes from mianesp's `WebServer`: `POST /reset`, `POST /set_hostname`,
@@ -138,6 +168,7 @@ Base routes from mianesp's `WebServer`: `POST /reset`, `POST /set_hostname`,
 | `POST /test` | `{"pattern":"black"\|"white"\|"calib"\|"colors"\|"rot"}` |
 | `GET /screen.pbm` | dump the framebuffer as PBM |
 | `POST /firmware` | push-OTA, raw `.bin` body |
+| `POST /reboot` | plain restart (needed after changing MQTT topics) |
 
 `GET /healthz` reports uptime, `heap_free`, `heap_min`, display-task stack
 headroom, refresh count and duration, BUSY timeouts, weather status/age/code, the
@@ -150,7 +181,12 @@ panel geometry and the local time.
 | `latitude` / `longitude` | `-33.8688` / `151.2093` | **strings**, passed verbatim to Open-Meteo |
 | `tz` | `AEST-10AEDT,M10.1.0,M4.1.0/3` | POSIX TZ |
 | `refresh_min` | `5` | clamped to a divisor of 60 |
-| `render_lead_s` | `30` | ~2 s fetch + up to 25 s render (temperature-dependent); biased early |
+| `inside_topic` / `inside_field` / `inside_label` | `""` / `temperature` / `IN` | empty topic => shows `--` |
+| `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose — see below |
+| `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
+| `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
+| `min_interval_min` | `10` | rate-limits repaints, clamped to >=3 |
+| `weather_poll_min` | `15` | a failed fetch retries after 60 s regardless |
 | `panel_w`/`panel_h` | `122`/`250` | fallback `128`/`296` — see below |
 | `rotation`, `invert_red` | `3`, `0` | |
 | `border`, `src_mode`, `update_mode` | `0x05`, `0x80`, `0xF7` | SSD1680 init bytes |
@@ -159,6 +195,18 @@ panel geometry and the local time.
 `SettingsBase` supports only `std::string` and `int` — no float, no bool. Lat/lon
 are strings because their only consumer is a URL, so text goes in with no
 conversion and nothing to round-trip wrong.
+
+**Why the labels are short.** They share a row with the big digits, so every pixel
+a label takes is stolen from the number. Measured at `Font_Label`, `OUTSIDE` is
+107px, leaving only 108px for the temperature — and `-12.4` needs 118px, `100.0`
+needs 130px. `IN`/`OUT` give the number a 158px budget, which fits everything.
+`tools/preview` asserts this.
+
+**The rate limit is bypassed exactly twice per boot:** the first paint of any kind,
+and the first paint that has *all* the data. At boot the MQTT readings arrive in
+under a second (retained topics) but the forecast needs DNS, TLS and usually one
+retry, so without that exception the panel would sit on "forecast unavailable" for
+a full `min_interval_min`. One extra refresh per boot is nothing against panel life.
 
 ## Bring-up results
 

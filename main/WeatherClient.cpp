@@ -70,8 +70,10 @@ bool WeatherClient::fetch(Weather& out) {
   lastStatus_ = esp_http_client_get_status_code(client);
 
   if (err != ESP_OK) {
-    ESP_LOGW(TAG, "fetch failed: %s", esp_err_to_name(err));
+    lastError_ = esp_err_to_name(err);
+    ESP_LOGW(TAG, "fetch failed: %s", lastError_);
   } else if (lastStatus_ != 200) {
+    lastError_ = "http status";
     // A 400 here almost always means a malformed latitude/longitude setting.
     ESP_LOGW(TAG, "HTTP %d (check latitude/longitude): %.*s", lastStatus_,
              static_cast<int>(body.size() > 160 ? 160 : body.size()),
@@ -129,7 +131,9 @@ bool WeatherClient::fetch(Weather& out) {
         w.fetchedAt = time(nullptr);
         out = w;
         ok = true;
+        lastError_ = "";
       } else {
+        lastError_ = "incomplete json";
         ESP_LOGW(TAG, "incomplete response (code=%d daily=%d)", haveCode,
                  haveDaily);
       }
