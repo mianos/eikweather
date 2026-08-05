@@ -27,9 +27,19 @@ struct ScreenModel {
   char outsideTemp[10] = {};
   bool outsideValid = false;
 
-  // ONE forecast line, small type under the rule. Not two: the band between the
-  // rule and the bottom edge is 25px, and two lines of Font_Cond need ~36px.
-  char forecast[48] = {};  // "Clear  6/17  rain 10%"
+  // ONE line under the rule, shared: forecast on the left, date on the right.
+  // Not two lines — the band between the rule and the bottom edge is 25px, and two
+  // lines of Font_Cond need ~36px.
+  //
+  // The date earns its place on a display that refuses to be a clock: it changes
+  // once a day, so it costs one refresh per day. A time would cost one per minute.
+  char forecast[48] = {};  // "Clear 6/16"  — condition and today's low/high
+  // 24, not 16: the compiler bounds %a and %b at 7 bytes each, so a 16-byte buffer
+  // trips -Werror=format-truncation even though real output is ~10 chars.
+  char date[24] = {};      // "Wed 5 Aug", empty until SNTP has synced
+  // Drawn right-aligned on the date line and LABELLED. A bare "0%" tacked onto the
+  // forecast was unreadable — nothing said what it was a percentage of.
+  char rain[16] = {};      // "rain 0%", empty when the API returns no probability
 
   // Non-null => draw the boot / provisioning screen instead of the readings.
   const char* banner = nullptr;

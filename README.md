@@ -11,12 +11,21 @@ driver, the text renderer and the layout are local.
 
 ```
 ┌─────────────────────────────────────┐
-│  IN                       21.4°     │  Font_Big 52pt · BLACK
+│  IN                       21.4°     │  Font_Big 44pt · BLACK
 │  OUT                       7.8°     │  RED
 │═════════════════════════════════════│  RED rule
-│  Partly cloudy 6/17 10%             │  Font_Cond
+│  Partly cloudy 6/17                 │  condition · today low/high
+│  Wed 5 Aug              rain 10%    │  date · chance of rain
 └─────────────────────────────────────┘
 ```
+
+The date belongs on a display that refuses to be a clock: it changes once a day,
+so it costs one refresh a day. A time would cost one a minute.
+
+`6/17` is today's forecast low/high (`temperature_2m_min` / `_max`) and `rain 10%`
+is `precipitation_probability_max`. The rain figure is **labelled** and on its own
+line because an unlabelled trailing `0%` on the forecast line was unreadable —
+nothing said what it was a percentage of.
 
 **It is not a clock, deliberately.** See below.
 
@@ -171,8 +180,18 @@ Base routes from mianesp's `WebServer`: `POST /reset`, `POST /set_hostname`,
 | `POST /reboot` | plain restart (needed after changing MQTT topics) |
 
 `GET /healthz` reports uptime, `heap_free`, `heap_min`, display-task stack
-headroom, refresh count and duration, BUSY timeouts, weather status/age/code, the
-panel geometry and the local time.
+headroom, refresh count and duration, BUSY timeouts, panel geometry and local time,
+plus:
+
+- **Freshness of every value**, each measured against the device's own `time()` at
+  the moment the value arrived rather than anything a server claimed:
+  `weather_age_s`, `inside_age_s`, `outside_age_s`, and the `*_fresh` booleans that
+  decide whether a reading draws as `--`.
+- `weather_status` **and** `weather_error`. A status of `0` means it never reached
+  HTTP at all, and `weather_error` carries the `esp_err_to_name` — which is how
+  `ESP_ERR_HTTP_CONNECT` on the first post-boot fetch was identified.
+- `inside_topic` / `outside_topic` and `mqtt_messages`, enough to diagnose a wrong
+  topic or field name without a serial cable.
 
 ### Settings worth knowing
 
@@ -201,6 +220,11 @@ a label takes is stolen from the number. Measured at `Font_Label`, `OUTSIDE` is
 107px, leaving only 108px for the temperature — and `-12.4` needs 118px, `100.0`
 needs 130px. `IN`/`OUT` give the number a 158px budget, which fits everything.
 `tools/preview` asserts this.
+
+**Why 44 pt and not 52.** The forecast and the date each need a full-width line:
+measured, the widest date is 113 px and the widest forecast 245 px against a 246 px
+line, so sharing one line means one always truncates. 44 pt figures (32 px) buy the
+second line; 52 pt (38 px) did not. Temperatures are still the dominant element.
 
 **The rate limit is bypassed exactly twice per boot:** the first paint of any kind,
 and the first paint that has *all* the data. At boot the MQTT readings arrive in

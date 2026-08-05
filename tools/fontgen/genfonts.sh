@@ -7,8 +7,10 @@
 #   Arial       — the forecast line (lighter, secondary).
 #
 # Sizes are chosen by MEASUREMENT via tools/preview, never from metrics tables.
-# Font_Big at 52pt gives 38px figures, which lets two temperature rows plus a
-# forecast line fit 122px of height. Verify any change with `make run` in
+# Font_Big at 44pt gives 32px figures, which lets two temperature rows plus a
+# forecast line AND a date line fit 122px of height. 52pt (38px) left room for only
+# one small line, which forced the forecast and date to share it and truncate.
+# Verify any change with `make run` in
 # tools/preview — it asserts every width and vertical budget.
 #
 # Character ranges are trimmed hard: Font_Big is 13 glyphs, not 95.
@@ -43,7 +45,7 @@ OUT=../../components/epaper/fonts/fonts.cpp
     echo 'namespace epd {'
     # Big temperatures: '-' '.' '/' '0'..'9' == 0x2D..0x39 (13 glyphs).
     # '/' rides along in the range and is used by the forecast hi/lo.
-    ./fontgen "$BOLD"        52 45 57  Font_Big
+    ./fontgen "$BOLD"        44 45 57  Font_Big
     # Labels (INSIDE / OUTSIDE) and the forecast need printable ASCII.
     ./fontgen "$BOLD"        24 32 126 Font_Label
     ./fontgen "$REG"         20 32 126 Font_Cond

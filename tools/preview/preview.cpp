@@ -29,11 +29,12 @@ constexpr int kH = 122;
 constexpr int kTempRightX = 232;
 constexpr int kLabelMaxW = 70;
 constexpr int kFcMaxW = 246;
-constexpr int kInsideLabelBaseline = 20;
-constexpr int kInsideTempBaseline = 43;
-constexpr int kOutsideLabelBaseline = 65;
-constexpr int kOutsideTempBaseline = 88;
-constexpr int kFcBaseline = 116;
+constexpr int kInsideLabelBaseline = 22;
+constexpr int kInsideTempBaseline = 34;
+constexpr int kOutsideLabelBaseline = 60;
+constexpr int kOutsideTempBaseline = 72;
+constexpr int kFcBaseline = 94;
+constexpr int kDateBaseline = 116;
 
 class MemCanvas final : public epd::Canvas {
  public:
@@ -126,17 +127,22 @@ int main() {
   // are 13 chars ("Partly cloudy", "Heavy drizzle", "Heavy showers"), so the
   // realistic worst case is checked here. drawTextClipped is the backstop for
   // anything pathological — it truncates with ".." rather than overflowing.
-  checkWidth("fc typical", epd::Font_Cond, "Partly cloudy 6/17 10%", kFcMaxW);
-  checkWidth("fc long cond", epd::Font_Cond, "Heavy drizzle 2/11 90%", kFcMaxW);
-  checkWidth("fc negative lo", epd::Font_Cond, "Heavy showers -9/45 100%", kFcMaxW);
-  checkWidth("fc no rain data", epd::Font_Cond, "Partly cloudy 6/17", kFcMaxW);
+  checkWidth("fc typical", epd::Font_Cond, "Clear 6/16", kFcMaxW);
+  checkWidth("fc worst", epd::Font_Cond, "Heavy showers -9/45", kFcMaxW);
+  // The date line is shared: date left, labelled rain chance right-aligned.
+  const int rainW = epd::measureText(epd::Font_Cond, "rain 100%").advance;
+  printf("  %-20s %-22s %4d px (date budget becomes %d)\n", "rain widest",
+         "rain 100%", rainW, kFcMaxW - rainW - 8);
+  checkWidth("date widest", epd::Font_Cond, "Wed 28 May", kFcMaxW - rainW - 8);
 
-  printf("\nvertical budgets (kH=%d, rule at y=94..96)\n", kH);
-  checkVertical("inside label", epd::Font_Label, "IN", kInsideLabelBaseline, 0, 93);
-  checkVertical("inside temp", epd::Font_Big, "-12.4", kInsideTempBaseline, 0, 93);
-  checkVertical("outside label", epd::Font_Label, "OUT", kOutsideLabelBaseline, 0, 93);
-  checkVertical("outside temp", epd::Font_Big, "-12.4", kOutsideTempBaseline, 0, 93);
-  checkVertical("forecast desc", epd::Font_Cond, "Heavy drizzle 2/11 90%", kFcBaseline, 97, 121);
+  printf("\nvertical budgets (kH=%d, rule at y=76..78)\n", kH);
+  checkVertical("inside label", epd::Font_Label, "IN", kInsideLabelBaseline, 0, 75);
+  checkVertical("inside temp", epd::Font_Big, "-12.4", kInsideTempBaseline, 0, 75);
+  checkVertical("outside label", epd::Font_Label, "OUT", kOutsideLabelBaseline, 0, 75);
+  checkVertical("outside temp", epd::Font_Big, "-12.4", kOutsideTempBaseline, 0, 75);
+  checkVertical("forecast desc", epd::Font_Cond, "Heavy drizzle 2/11", kFcBaseline, 79, 121);
+  checkVertical("rain desc", epd::Font_Cond, "rain 100%", kDateBaseline, 79, 121);
+  checkVertical("date desc", epd::Font_Cond, "Wed 28 Sep", kDateBaseline, 79, 121);
 
   // Row separation: the inside block must not touch the outside block, and the
   // two forecast lines must not touch each other.
@@ -149,12 +155,20 @@ int main() {
     printf("  %-20s inside bottom=%d  outside label top=%d  %s\n", "row separation",
            insideBot, outsideTop, ok ? "ok" : "*** ROWS COLLIDE ***");
   }
+  {
+    const int fcBot = kFcBaseline + epd::measureText(epd::Font_Cond, "Heavy drizzle 2/11").inkBottom;
+    const int dTop = kDateBaseline + epd::measureText(epd::Font_Cond, "Wed 28 Sep").inkTop;
+    const bool ok = dTop > fcBot;
+    if (!ok) ++fails;
+    printf("  %-20s forecast bottom=%d  date top=%d  %s\n", "small-line sep",
+           fcBot, dTop, ok ? "ok" : "*** LINES COLLIDE ***");
+  }
   struct Case { const char* name; ScreenModel m; };
   std::vector<Case> cases;
 
   auto mk = [](const char* name, const char* inL, const char* inT, bool inV,
                const char* outL, const char* outT, bool outV,
-               const char* fc) {
+               const char* fc, const char* date, const char* rain) {
     Case c{name, {}};
     snprintf(c.m.insideLabel, sizeof c.m.insideLabel, "%s", inL);
     snprintf(c.m.insideTemp, sizeof c.m.insideTemp, "%s", inT);
@@ -163,17 +177,19 @@ int main() {
     snprintf(c.m.outsideTemp, sizeof c.m.outsideTemp, "%s", outT);
     c.m.outsideValid = outV;
     snprintf(c.m.forecast, sizeof c.m.forecast, "%s", fc);
+    snprintf(c.m.date, sizeof c.m.date, "%s", date);
+    snprintf(c.m.rain, sizeof c.m.rain, "%s", rain);
     return c;
   };
 
   cases.push_back(mk("normal", "IN", "21.4", true, "OUT", "7.8", true,
-                     "Partly cloudy 6/17 10%"));
+                     "Partly cloudy 6/17", "Wed 5 Aug", "rain 10%"));
   cases.push_back(mk("widest", "IN", "-12.4", true, "OUT", "100.0", true,
-                     "Heavy showers -9/45 100%"));
+                     "Heavy showers -9/45", "Wed 28 May", "rain 100%"));
   cases.push_back(mk("no-mqtt", "IN", "--", false, "OUT", "--", false,
-                     "Clear 6/17 - no MQTT yet"));
+                     "Clear 6/17", "", ""));
   cases.push_back(mk("lounge", "IN", "19.0", true, "OUT", "3.2", true,
-                     "Heavy drizzle 2/11 90%"));
+                     "Heavy drizzle 2/11", "Sat 12 Jul", "rain 90%"));
   {
     Case c{"banner", {}};
     c.m.banner = "einkclock";

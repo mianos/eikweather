@@ -13,13 +13,19 @@
 //
 //      x=0    74                                     232  246
 //       +------+---------------------------------------+----+
-//  y=20 |  IN                            2 1 . 4 °          |  label Font_Label
-//  y=43 |                              Font_Big, 38px       |  temp  BLACK
-//  y=65 |  OUT                            7 . 8 °           |
-//  y=88 |                              right-aligned x=232  |  temp  RED
-//  y=94 |===================================================|  RED rule
-//  y=116|  Partly cloudy   6 / 17   rain 10%                |  Font_Cond
+//  y=22 |  IN                            2 1 . 4 °          |  label Font_Label
+//  y=34 |                              Font_Big, 32px       |  temp  BLACK
+//  y=60 |  OUT                            7 . 8 °           |
+//  y=72 |                              right-aligned x=232  |  temp  RED
+//  y=76 |===================================================|  RED rule
+//  y=94 |  Partly cloudy 6/17                               |  Font_Cond
+//  y=116|  Wed 5 Aug                            rain 10%    |  Font_Cond
 //       +---------------------------------------------------+
+//
+// The forecast and the date each get their OWN full-width line. Sharing one line
+// does not work: measured, the widest date is 113px and the widest forecast 245px
+// against a 246px line, so one of them would always truncate. Font_Big was reduced
+// 52pt -> 44pt to buy the second line.
 //
 // Inside is BLACK and outside is RED. That is the one piece of colour that earns
 // its place: which number is which is readable across a room without reading the
@@ -28,10 +34,10 @@
 namespace {
 
 constexpr int kLabelX = 4;
-constexpr int kInsideLabelBaseline = 20;
-constexpr int kInsideTempBaseline = 43;
-constexpr int kOutsideLabelBaseline = 65;
-constexpr int kOutsideTempBaseline = 88;
+constexpr int kInsideLabelBaseline = 22;
+constexpr int kInsideTempBaseline = 34;
+constexpr int kOutsideLabelBaseline = 60;
+constexpr int kOutsideTempBaseline = 72;
 
 constexpr int kTempRightX = 232;  // right edge of the digits; ring sits beyond
 constexpr int kDegreeR = 4;
@@ -39,12 +45,12 @@ constexpr int kDegreeR = 4;
 // takes is stolen from the number. See the note in ScreenModel.h.
 constexpr int kLabelMaxW = 70;
 
-constexpr int kSepY = 94;
+constexpr int kSepY = 76;
 constexpr int kSepH = 3;
-// ONE line, baseline 116 -> ink y=[101..120], inside the 97..121 band between the
-// rule and the bottom edge. A baseline of 108 puts the ascenders into the rule,
-// and there is no room for a second line.
-constexpr int kFcBaseline = 116;
+// Two lines between the rule (ends y=78) and the bottom edge (121): 43px for
+// 2 x ~19px of Font_Cond. Baselines set by DESCENDER depth, not cap height.
+constexpr int kFcBaseline = 94;
+constexpr int kDateBaseline = 116;
 constexpr int kFcMaxW = 246;  // x=4..249, the full remaining width
 
 // One reading: label on the left, big right-aligned number, degree ring beyond
@@ -60,7 +66,7 @@ void drawReading(epd::Canvas& c, const char* label, int labelBaseline,
     epd::drawTextRight(c, epd::Font_Big, kTempRightX, tempBaseline, temp, colour);
     if (valid) {
       epd::drawDegree(c, kTempRightX + 2 + kDegreeR,
-                      tempBaseline - 30 + kDegreeR, kDegreeR, colour);
+                      tempBaseline - 25 + kDegreeR, kDegreeR, colour);
     }
   }
 }
@@ -96,5 +102,18 @@ void renderScreen(epd::Canvas& c, const ScreenModel& m) {
   if (m.forecast[0]) {
     epd::drawTextClipped(c, epd::Font_Cond, kLabelX, kFcBaseline, kFcMaxW,
                          m.forecast, epd::Color::Black);
+  }
+  // Rain chance is drawn first and right-aligned, and the date's budget shrinks
+  // around its MEASURED width, so the date truncates before they can collide.
+  int dateBudget = kFcMaxW;
+  if (m.rain[0]) {
+    epd::drawTextRight(c, epd::Font_Cond, c.width() - 4, kDateBaseline, m.rain,
+                       epd::Color::Black);
+    dateBudget -= epd::measureText(epd::Font_Cond, m.rain).advance + 8;
+    if (dateBudget < 40) dateBudget = 40;
+  }
+  if (m.date[0]) {
+    epd::drawTextClipped(c, epd::Font_Cond, kLabelX, kDateBaseline, dateBudget,
+                         m.date, epd::Color::Black);
   }
 }

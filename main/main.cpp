@@ -162,20 +162,36 @@ void buildModel(const App& app, ScreenModel& m) {
   formatReading(app.sensors->outside(), s.sensorStaleMin, m.outsideTemp,
                 sizeof m.outsideTemp, &m.outsideValid);
 
-  // "<condition> <lo>/<hi> <rain>%" — tools/preview asserts this fits 246px.
+  // "<condition> <lo>/<hi>" on the forecast line; the rain chance goes on the date
+  // line, labelled, because a bare trailing "0%" did not say what it measured.
   if (app.current.valid) {
-    const char* cond = wmoText(app.current.code);
+    snprintf(m.forecast, sizeof m.forecast, "%s %d/%d", wmoText(app.current.code),
+             static_cast<int>(lroundf(app.current.lo)),
+             static_cast<int>(lroundf(app.current.hi)));
     if (app.current.rainPct >= 0) {
-      snprintf(m.forecast, sizeof m.forecast, "%s %d/%d %d%%", cond,
-               static_cast<int>(lroundf(app.current.lo)),
-               static_cast<int>(lroundf(app.current.hi)), app.current.rainPct);
-    } else {
-      snprintf(m.forecast, sizeof m.forecast, "%s %d/%d", cond,
-               static_cast<int>(lroundf(app.current.lo)),
-               static_cast<int>(lroundf(app.current.hi)));
+      // Clamp: it is a percentage, and a bogus API value must not render as
+      // "rain -2147483648%". Also keeps snprintf inside the buffer, which
+      // -Werror=format-truncation checks against the full int range.
+      const int pct = app.current.rainPct > 100 ? 100 : app.current.rainPct;
+      snprintf(m.rain, sizeof m.rain, "rain %d%%", pct);
     }
   } else {
     snprintf(m.forecast, sizeof m.forecast, "%s", "forecast unavailable");
+  }
+
+  // Changes once a day, so it costs one refresh a day. Left empty until SNTP has
+  // synced: a wrong date burned into e-paper is worse than no date.
+  //
+  // %-d is a glibc extension newlib does not support, and %e space-pads
+  // ("Wed  5 Aug", double space), so assemble it explicitly.
+  const time_t now = time(nullptr);
+  if (now >= kPlausibleTime) {
+    struct tm t;
+    localtime_r(&now, &t);
+    char wd[8], mon[8];
+    strftime(wd, sizeof wd, "%a", &t);
+    strftime(mon, sizeof mon, "%b", &t);
+    snprintf(m.date, sizeof m.date, "%s %d %s", wd, t.tm_mday, mon);
   }
 }
 
@@ -198,7 +214,8 @@ bool sameAsDrawn(const ScreenModel& a, const ScreenModel& b) {
          strcmp(a.outsideLabel, b.outsideLabel) == 0 &&
          strcmp(a.outsideTemp, b.outsideTemp) == 0 &&
          a.outsideValid == b.outsideValid &&
-         strcmp(a.forecast, b.forecast) == 0;
+         strcmp(a.forecast, b.forecast) == 0 && strcmp(a.date, b.date) == 0 &&
+         strcmp(a.rain, b.rain) == 0;
 }
 
 void paint(App& app, const ScreenModel& m) {
