@@ -40,7 +40,20 @@ struct ScreenModel {
   //
   // The date earns its place on a display that refuses to be a clock: it changes
   // once a day, so it costs one refresh per day. A time would cost one per minute.
-  char forecast[48] = {};  // "Clear 6/16"  — condition and today's low/high
+  char forecast[48] = {};      // "Clear 6/16" — condition and today's low/high
+  bool forecastValid = false;  // false => the fetch has never succeeded
+  // Third reading (heat pump hot water tank), right-aligned on the FORECAST line
+  // with a small degree ring, directly above the rain chance.
+  //
+  // UNLABELLED by default — just "48" plus the ring. It shares the tightest line
+  // on the screen: measured, the condition plus today's lo/hi is up to 188px of a
+  // 246px line, so the bare number's 39px worst case is all that fits. A label is
+  // available via water_label for anyone who wants one, at the cost of the
+  // forecast text truncating.
+  //
+  // Empty => drawn as nothing and the forecast keeps the full width, which covers
+  // both "not configured" and "gone stale".
+  char water[16] = {};
   // 24, not 16: the compiler bounds %a and %b at 7 bytes each, so a 16-byte buffer
   // trips -Werror=format-truncation even though real output is ~10 chars.
   char date[24] = {};      // "Wed 5 Aug", empty until SNTP has synced

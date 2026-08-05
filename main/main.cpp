@@ -178,12 +178,38 @@ void buildModel(const App& app, ScreenModel& m) {
   formatReading(app.sensors->outside(), s.sensorStaleMin, m.outsideTemp,
                 sizeof m.outsideTemp, &m.outsideValid, &m.outsideTrend);
 
+  // The heat pump hot water tank, right-aligned on the forecast line.
+  //
+  // INTEGER degrees and NO label by default. Both are width decisions: this line
+  // already carries the condition plus today's lo/hi (up to 188px of 246), so the
+  // number gets the ~39px that is left. A tenth of a degree on a hot water tank is
+  // not something anyone acts on, and a label ("HWS ") costs another 52px, which
+  // would truncate the forecast text — set water_label if you want it anyway.
+  //
+  // Stale or unconfigured leaves it EMPTY rather than "--": the forecast then gets
+  // that width back, whereas the two big rows have a dedicated row each that would
+  // look broken if blank.
+  const Reading& w = app.sensors->water();
+  if (w.fresh(s.sensorStaleMin)) {
+    // Clamped for the same reason as the rain percentage: a garbage payload must
+    // not render as "-2147483648".
+    long t = lroundf(w.value);
+    if (t < -99) t = -99;
+    if (t > 999) t = 999;
+    if (s.waterLabel.empty()) {
+      snprintf(m.water, sizeof m.water, "%ld", t);
+    } else {
+      snprintf(m.water, sizeof m.water, "%s %ld", s.waterLabel.c_str(), t);
+    }
+  }
+
   // "<condition> <lo>/<hi>" on the forecast line; the rain chance goes on the date
   // line, labelled, because a bare trailing "0%" did not say what it measured.
   if (app.current.valid) {
     snprintf(m.forecast, sizeof m.forecast, "%s %d/%d", wmoText(app.current.code),
              static_cast<int>(lroundf(app.current.lo)),
              static_cast<int>(lroundf(app.current.hi)));
+    m.forecastValid = true;
     if (app.current.rainPct >= 0) {
       // Clamp: it is a percentage, and a bogus API value must not render as
       // "rain -2147483648%". Also keeps snprintf inside the buffer, which
@@ -216,8 +242,10 @@ void buildModel(const App& app, ScreenModel& m) {
 // a second (the topics are retained) but the forecast needs DNS, TLS and often a
 // retry, so without this exception the panel sits on "forecast unavailable" for a
 // full min_interval_min. One extra refresh per boot is nothing against panel life.
+// A flag, not strstr() on the forecast text: sniffing for "unavailable" broke
+// silently the moment that string was shortened for the new layout.
 bool complete(const ScreenModel& m) {
-  return m.insideValid && m.outsideValid && strstr(m.forecast, "unavailable") == nullptr;
+  return m.insideValid && m.outsideValid && m.forecastValid;
 }
 
 // Everything that is actually drawn. Comparing this is what decides whether a
@@ -234,7 +262,7 @@ bool sameAsDrawn(const ScreenModel& a, const ScreenModel& b) {
          strcmp(a.outsideTemp, b.outsideTemp) == 0 &&
          a.outsideValid == b.outsideValid && a.outsideTrend == b.outsideTrend &&
          strcmp(a.forecast, b.forecast) == 0 && strcmp(a.date, b.date) == 0 &&
-         strcmp(a.rain, b.rain) == 0;
+         strcmp(a.rain, b.rain) == 0 && strcmp(a.water, b.water) == 0;
 }
 
 void paint(App& app, const ScreenModel& m) {
@@ -357,10 +385,10 @@ void displayTask(void* arg) {
       app.lastStackHighWater =
           static_cast<int32_t>(uxTaskGetStackHighWaterMark(nullptr));
       ESP_LOGI(TAG,
-               "painted %s %s %s | %s %s %s | %s | heap %u min %u | stack %d",
+               "painted %s %s %s | %s %s %s | %s | %s | heap %u min %u | stack %d",
                want.insideLabel, want.insideTemp, trendName(want.insideTrend),
                want.outsideLabel, want.outsideTemp,
-               trendName(want.outsideTrend), want.forecast,
+               trendName(want.outsideTrend), want.water, want.forecast,
                static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()),
                static_cast<int>(app.lastStackHighWater));
@@ -450,8 +478,9 @@ extern "C" void app_main(void) {
     settings.onChange(key, reconfigure);
   }
   // Anything that changes what is drawn or how often — takes effect immediately.
-  for (const char* key : {"inside_label", "outside_label", "sensor_stale_min",
-                          "min_interval_min", "weather_poll_min"}) {
+  for (const char* key : {"inside_label", "outside_label", "water_label",
+                          "sensor_stale_min", "min_interval_min",
+                          "weather_poll_min"}) {
     settings.onChange(key, [] {
       if (s_displayTask) xTaskNotifyGive(s_displayTask);
     });
@@ -460,7 +489,8 @@ extern "C" void app_main(void) {
   // MqttClient has no way to REMOVE a handler binding, so re-pointing a topic
   // means a restart. Say so rather than leaving it silently ineffective.
   for (const char* key : {"mqtt_server", "mqtt_port", "inside_topic",
-                          "inside_field", "outside_topic", "outside_field"}) {
+                          "inside_field", "outside_topic", "outside_field",
+                          "water_topic", "water_field"}) {
     settings.onChange(key, [] {
       ESP_LOGW(TAG, "MQTT settings changed — POST /reboot to apply");
     });

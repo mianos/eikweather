@@ -42,6 +42,23 @@ struct Settings : SettingsBase {
   std::string outsideField = "temperature";
   std::string outsideLabel = "OUT";
 
+  // A third, OPTIONAL reading (the heat pump / hot water tank), shown small and
+  // right-aligned on the forecast line rather than as a third big row — there is
+  // no vertical room for another row, and it is a "is the tank hot" glance, not
+  // something you read from across the room.
+  //
+  // Empty topic => drawn as nothing at all, and the forecast gets the full width
+  // back. Unlike the two big readings it does NOT fall back to "--" when stale:
+  // that row is dedicated, so a blank would look broken, whereas this shares the
+  // most width-constrained line on the screen and the forecast can use the space.
+  std::string waterTopic = "";
+  std::string waterField = "temperature";
+  // EMPTY on purpose: the forecast line already carries the condition plus today's
+  // lo/hi, and only ~39px is left. Setting this (e.g. "HWS") costs another ~52px,
+  // which truncates the forecast text — available if you would rather have the
+  // label, but it is a real trade, not free.
+  std::string waterLabel = "";
+
   // A reading older than this shows "--" rather than leaving a plausible but
   // hours-old number on a display that repaints only every few minutes.
   // 0 disables the staleness check.
@@ -114,6 +131,9 @@ struct Settings : SettingsBase {
     field("outside_topic", outsideTopic);
     field("outside_field", outsideField);
     field("outside_label", outsideLabel);
+    field("water_topic", waterTopic);
+    field("water_field", waterField);
+    field("water_label", waterLabel);
     field("sensor_stale_min", sensorStaleMin);
     field("trend_win_min", trendWinMin);
     field("trend_tenths", trendTenths);

@@ -85,6 +85,7 @@ class Sensors {
 
   const Reading& inside() const { return inside_; }
   const Reading& outside() const { return outside_; }
+  const Reading& water() const { return water_; }
   uint32_t messages() const { return messages_; }
 
  private:
@@ -103,8 +104,12 @@ class Sensors {
   TaskHandle_t notify_;
   Reading inside_;
   Reading outside_;
+  Reading water_;
   uint32_t messages_ = 0;
 
+  // One per topic, and they must OUTLIVE attach(): MqttClient keeps the void*
+  // context pointer, so these cannot be locals.
   Binding insideBinding_{};
   Binding outsideBinding_{};
+  Binding waterBinding_{};
 };

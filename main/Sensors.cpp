@@ -53,11 +53,15 @@ void Sensors::attach(MqttClient& mqtt) {
        "inside"},
       {settings_.outsideTopic, settings_.outsideField, &outside_,
        &outsideBinding_, "outside"},
+      {settings_.waterTopic, settings_.waterField, &water_, &waterBinding_,
+       "water"},
   };
 
   for (const Spec& s : specs) {
     if (s.topic.empty()) {
-      ESP_LOGW(TAG, "%s topic not configured — will show \"--\"", s.name);
+      // inside/outside fall back to "--"; water is simply omitted. Don't claim
+      // either here.
+      ESP_LOGW(TAG, "%s topic not configured", s.name);
       continue;
     }
     *s.binding = Binding{this, s.dest, &s.field, s.name};

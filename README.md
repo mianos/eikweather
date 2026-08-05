@@ -183,7 +183,34 @@ subscribes rather than waiting for the next sensor report:
 |---|---|
 | `home/temperature/lounge` | Zigbee `0xD1EB` — the indoor reading |
 | `home/temperature/outside` | Zigbee `0x8C4D` |
+| `home/temperature/hotwater` | heat pump tank — **published by a node this project added**, see below |
 | `home/temperature/office`, `.../bedroom` | also published, not used here |
+
+### The hot water tank topic did not exist
+
+The heat pump is a Tuya device read by a `tuya-smart-device` node in Node-RED flow
+`bd780c1b6099c93d` (`nr2.mianos.com:1880`). The tank temperature is Tuya datapoint
+**3** (falling back to **102**), merged into flow context by the `merge dps` node —
+and it only ever went to a `ui_chart`. **Nothing published it to MQTT**, so there
+was no topic for this display to subscribe to.
+
+Two nodes were added to that flow (additive — `hp_parse` gained one extra wire,
+no existing node was altered):
+
+| Node | Does |
+|---|---|
+| `hp_tank_mqtt_fn` (function) | reads dp 3 / 102 off `hp_parse`, emits `{"temperature": t}` |
+| `hp_tank_mqtt_out` (mqtt out) | publishes to `home/temperature/hotwater`, QoS 0, **retained** |
+
+`retain` is the part that matters: the Tuya device pushes only on change, so
+without it a display reboot would show nothing until the heat pump next moved.
+With it, the tank temperature arrives within a second of connecting — measured at
+16 s after a cold boot, which was DHCP and MQTT connect, not the topic.
+
+It extracts the value exactly the way the existing `tank temp -> chart` node does,
+rather than inventing a second interpretation of the datapoints. If the tank
+reading ever goes blank, check that flow first — `/healthz` `water_seen: false`
+with a non-empty `water_topic` means the publisher is gone, not the display.
 
 Payloads are `{"temperature":15.3,"unit":"C","timestamp":"..."}` — flat JSON with
 a named numeric field, matching the rest of this broker (`tele/ldr/lux` publishes
@@ -244,6 +271,8 @@ plus:
 | `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
 | `trend_win_min` / `trend_tenths` | `30` / `3` | rise/fall arrow window and 0.1 degC deadband |
+| `water_topic` / `water_field` | `""` / `temperature` | optional third reading; empty => not drawn at all |
+| `water_label` | `""` | empty on purpose — a label truncates the forecast, see below |
 | `min_interval_min` | `10` | rate-limits repaints, clamped to >=3 |
 | `weather_poll_min` | `15` | a failed fetch retries after 60 s regardless |
 | `panel_w`/`panel_h` | `122`/`250` | fallback `128`/`296` — see below |
@@ -320,10 +349,15 @@ compile natively:
 cd tools/preview && make run && open out-*.ppm
 ```
 
-This prints measured width and vertical budgets for every string and renders five
-cases (normal, widest, no-weather, stale, banner). It catches things inspection
-does not — it found that a condition baseline of 119, the obvious choice from cap
-height, clips the descender of "Partly cloudy" off the bottom edge.
+This prints measured width and vertical budgets for every string and renders six
+cases (normal, widest, no-weather, steady/no-arrow, long-label, banner). It catches
+things inspection does not — it found that a condition baseline of 119, the obvious
+choice from cap height, clips the descender of "Partly cloudy" off the bottom edge,
+and it is what settled whether the tank temperature could carry a label.
+
+**Add a check whenever you add an item to a shared line.** Both bottom lines and
+both temperature rows now carry two items, and every one of those pairings is
+asserted numerically here. A budget failure exits non-zero.
 
 **Keep those three files free of `esp_*` includes.**
 
@@ -378,6 +412,29 @@ mutex and no torn reads; the TLS handshake's 25–45 KB is fully freed before th
 panel work starts, so the two largest memory peaks never coexist on a 320 KB part;
 and the fetch result is known before anything is drawn, so the stale indicator
 comes from fact rather than a race.
+
+**The tank temperature is unlabelled because the line is full.** It rides
+right-aligned on the forecast line, directly above the rain chance, with a small
+degree ring. Measured against a 246px line at 20pt:
+
+| Forecast line contents | Width |
+|---|---|
+| `Heavy showers -9/45` (pathological worst) | 188 px |
+| `Partly cloudy 6/17` (realistic worst) | 159 px |
+| bare `100` + degree ring | 39 px |
+| `HWS 100` + degree ring | 91 px |
+
+188 + 8 + 39 = 235 fits; 188 + 8 + 91 = 287 does not, and even the realistic
+159 + 8 + 91 = 258 overflows. So a labelled tank temperature and today's lo/hi
+cannot coexist on that line — one of them has to go. `water_label` is still a
+setting for anyone who wants the label and will accept the forecast text
+truncating; it just defaults to empty. `tools/preview` prints what a label would
+cost so the trade stays visible rather than being rediscovered.
+
+Integer degrees for the same reason, plus a tenth of a degree on a hot water tank
+is not something anyone acts on. Stale or unconfigured draws **nothing** rather
+than `--`: the forecast then reclaims the width, whereas the two big rows each own
+a dedicated row that would look broken if blank.
 
 **MQTT connects when there is an IP, not when `app_main` ends.** `app_main`
 finishes about a second *before* DHCP hands over the lease, so calling

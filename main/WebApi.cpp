@@ -126,6 +126,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   // wrong topic or field name without a serial cable.
   const Reading& in = app_.sensors->inside();
   const Reading& out = app_.sensors->outside();
+  const Reading& hw = app_.sensors->water();
   json.AddItem("mqtt_messages", static_cast<int>(app_.sensors->messages()));
   json.AddItem("inside_topic", settings_.insideTopic);
   json.AddItem("inside_seen", in.everSeen);
@@ -146,6 +147,20 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("outside_trend", trendName(out.trend));
   json.AddItem("outside_trend_age_s",
                out.refAt ? static_cast<int>(now - out.refAt) : -1);
+  // The optional third reading. water_topic "" means it is not configured, which
+  // is indistinguishable on screen from "configured but stale" — both are blank —
+  // so surface enough here to tell them apart.
+  json.AddItem("water_topic", settings_.waterTopic);
+  json.AddItem("water_seen", hw.everSeen);
+  json.AddItem("water_value", hw.value);
+  json.AddItem("water_age_s", hw.everSeen ? static_cast<int>(now - hw.at) : -1);
+  json.AddItem("water_fresh", hw.fresh(settings_.sensorStaleMin));
+  // Computed for free by the shared handler and worth surfacing even though there
+  // is no room to draw it: "is the heat pump actually heating right now" is the
+  // most useful thing about a tank temperature.
+  json.AddItem("water_trend", trendName(hw.trend));
+  json.AddItem("water_trend_age_s",
+               hw.refAt ? static_cast<int>(now - hw.refAt) : -1);
 
   json.AddItem("panel_w", settings_.panelW);
   json.AddItem("panel_h", settings_.panelH);

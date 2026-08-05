@@ -21,7 +21,7 @@
 //  y=72 |        v                     right-aligned x=232  |  temp  RED
 //            up if rising, down if falling, nothing otherwise
 //  y=76 |===================================================|  RED rule
-//  y=94 |  Partly cloudy 6/17                               |  Font_Cond
+//  y=94 |  Partly cloudy 6/17                          48°  |  Font_Cond
 //  y=116|  Wed 5 Aug                            rain 10%    |  Font_Cond
 //       +---------------------------------------------------+
 //
@@ -29,6 +29,12 @@
 // does not work: measured, the widest date is 113px and the widest forecast 245px
 // against a 246px line, so one of them would always truncate. Font_Big was reduced
 // 52pt -> 44pt to buy the second line.
+//
+// Both bottom lines carry a right-aligned passenger (the water temperature and
+// the rain chance). In each case the passenger is drawn FIRST and the left item's
+// budget shrinks around its measured width, so the left item truncates with ".."
+// before they can ever collide. There is no vertical room for a third line: the
+// band below the rule is 43px and Font_Cond needs ~19px a line.
 //
 // Inside is BLACK and outside is RED. That is the one piece of colour that earns
 // its place: which number is which is readable across a room without reading the
@@ -67,6 +73,11 @@ constexpr int kSepH = 3;
 constexpr int kFcBaseline = 94;
 constexpr int kDateBaseline = 116;
 constexpr int kFcMaxW = 246;  // x=4..249, the full remaining width
+// Degree ring for the small water reading. r=2, not the big rows' r=4: it has to
+// read as a degree sign against 20pt text, not 44pt.
+constexpr int kSmallDegreeR = 2;
+constexpr int kRightMargin = 4;
+constexpr int kPassengerGap = 8;  // clearance between a line's two items
 
 // x of the shared arrow column: past the WIDER of the two labels, so it clears
 // both. Clamped to kLabelMaxW because that is where drawTextClipped truncates.
@@ -146,17 +157,34 @@ void renderScreen(epd::Canvas& c, const ScreenModel& m) {
 
   epd::fillRect(c, 0, kSepY, c.width(), kSepH, epd::Color::Red);
 
+  // Both bottom lines: right-aligned passenger FIRST, then the left item with a
+  // budget shrunk around the passenger's measured width.
+  int fcBudget = kFcMaxW;
+  if (m.water[0]) {
+    // The ring sits beyond the digits, so the text right-aligns short of the
+    // margin by the ring's full width.
+    const int ringW = 2 * kSmallDegreeR + 1;
+    const int ringCx = c.width() - kRightMargin - kSmallDegreeR;
+    epd::drawTextRight(c, epd::Font_Cond, ringCx - kSmallDegreeR - 1, kFcBaseline,
+                       m.water, epd::Color::Black);
+    // -12: Font_Cond's cap height, so the ring aligns with the tops of the
+    // digits rather than floating above them.
+    epd::drawDegree(c, ringCx, kFcBaseline - 12, kSmallDegreeR, epd::Color::Black);
+    fcBudget -= epd::measureText(epd::Font_Cond, m.water).advance + ringW + 1 +
+                kPassengerGap;
+    if (fcBudget < 40) fcBudget = 40;
+  }
   if (m.forecast[0]) {
-    epd::drawTextClipped(c, epd::Font_Cond, kLabelX, kFcBaseline, kFcMaxW,
+    epd::drawTextClipped(c, epd::Font_Cond, kLabelX, kFcBaseline, fcBudget,
                          m.forecast, epd::Color::Black);
   }
-  // Rain chance is drawn first and right-aligned, and the date's budget shrinks
-  // around its MEASURED width, so the date truncates before they can collide.
+
   int dateBudget = kFcMaxW;
   if (m.rain[0]) {
-    epd::drawTextRight(c, epd::Font_Cond, c.width() - 4, kDateBaseline, m.rain,
-                       epd::Color::Black);
-    dateBudget -= epd::measureText(epd::Font_Cond, m.rain).advance + 8;
+    epd::drawTextRight(c, epd::Font_Cond, c.width() - kRightMargin,
+                       kDateBaseline, m.rain, epd::Color::Black);
+    dateBudget -=
+        epd::measureText(epd::Font_Cond, m.rain).advance + kPassengerGap;
     if (dateBudget < 40) dateBudget = 40;
   }
   if (m.date[0]) {
