@@ -77,6 +77,46 @@ Comparing formatted output beats a temperature-delta threshold: there is no
 threshold to tune, and it automatically accounts for rounding, the staleness
 fallback to `--`, and forecast text changes.
 
+## The rise / fall arrow
+
+Each reading gets an arrow in what used to be dead space between the label and
+the digits. **Only a moving temperature is marked** — rising or falling. Steady
+and "don't know yet" are both simply blank, because the arrow answers "which way
+is it going", and a third symbol for "it isn't" would be one more thing to learn
+for the one case where the number alone already says everything.
+
+The trend compares the current reading against the one from `trend_win_min`
+(default 30) minutes ago, and only claims a direction once the move exceeds
+`trend_tenths` (default 0.3 degC). It comes from a **single anchor re-set once per
+window**, not a rolling comparison, and that bound is the point rather than a
+simplification: every change of the arrow costs a full ~20 s repaint, so a rolling
+comparison would flap across the threshold and burn a refresh each time. As built,
+each reading's arrow can change at most once per window.
+
+Consequences worth knowing:
+
+- **No arrow for the first half hour after a reboot** — there is genuinely no
+  basis for one yet. `/healthz` separates the two blank cases that look identical
+  on screen: `inside_trend` is `unknown` vs `steady`, and
+  `inside_trend_age_s` below `trend_win_min * 60` means "not enough history yet",
+  not "sensor is dead".
+- **A gap longer than 3x the window resets to unknown** instead of comparing
+  across it. A publisher that went away for two hours, or SNTP stepping the clock
+  at boot, would otherwise manufacture a trend out of a meaningless difference.
+  This also means a sensor publishing less often than ~2x the window can never
+  resolve a trend — visible if you shorten `trend_win_min` below the publish
+  interval to test, which is exactly what happened to `home/temperature/outside`
+  (~6 min between messages) at `trend_win_min=1`.
+- `--` (stale or never seen) gets no arrow, so a dead sensor's last known
+  direction cannot sit on the glass indefinitely.
+
+Both rows share **one** arrow column, derived from the wider of the two labels,
+so the arrows line up vertically. If a long custom label plus a wide reading
+(`LOUNGE` + `-12.4`) leaves no room, the arrow is dropped and the number keeps
+the space — it is the decoration, the temperature is the point. `tools/preview`
+asserts the column fits for the default labels rather than leaving it to be
+noticed on glass.
+
 ## Hardware
 
 Confirmed with `esptool -p /dev/cu.usbserial-1440 flash-id`: **ESP32-D0WD-V3 rev
@@ -203,6 +243,7 @@ plus:
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose — see below |
 | `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
+| `trend_win_min` / `trend_tenths` | `30` / `3` | rise/fall arrow window and 0.1 degC deadband |
 | `min_interval_min` | `10` | rate-limits repaints, clamped to >=3 |
 | `weather_poll_min` | `15` | a failed fetch retries after 60 s regardless |
 | `panel_w`/`panel_h` | `122`/`250` | fallback `128`/`296` — see below |
@@ -337,6 +378,18 @@ mutex and no torn reads; the TLS handshake's 25–45 KB is fully freed before th
 panel work starts, so the two largest memory peaks never coexist on a 320 KB part;
 and the fetch result is known before anything is drawn, so the stale indicator
 comes from fact rather than a race.
+
+**MQTT connects when there is an IP, not when `app_main` ends.** `app_main`
+finishes about a second *before* DHCP hands over the lease, so calling
+`esp_mqtt_client_start()` there guaranteed a failed first connect
+(`getaddrinfo() returns 202`) and then made the first reading wait out esp-mqtt's
+10 s reconnect backoff. The display task starts the client after polling the netif
+for an actual address; measured, the first reading now arrives ~2 s after boot
+instead of ~11 s. The client is still *constructed* in `app_main` — subscriptions
+queue up and `MqttClient::resubscribe()` replays them on connect — so only the
+connect itself is deferred. The check is state-based (interrogate the netif) rather
+than event-based on purpose: the display task is created after `WiFiManager`, so a
+one-shot `IP_EVENT_STA_GOT_IP` may already have been missed.
 
 **Never draw a wrong date.** Nothing formats the date until
 `time(nullptr) >= 1700000000`; the line is simply absent until SNTP has synced. A

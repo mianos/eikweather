@@ -63,4 +63,13 @@ void drawLine(Canvas&, int x0, int y0, int x1, int y1, Color);  // Bresenham
 // get U+00B0 would pull in ~130 junk glyphs.
 void drawDegree(Canvas&, int cx, int cy, int r, Color);
 
+// A solid trend arrow: triangular head plus a stem, drawn in the box whose
+// bottom-left corner is (x, bottomY) — bottomY so it can be passed a text
+// BASELINE and sit on the same line as the digits beside it.
+//
+// dir > 0 points up, dir < 0 down, dir == 0 draws nothing. The head is w+1 px
+// across, since it is symmetric about x + w/2. Prefer an odd w so the stem lands
+// exactly on the centre column.
+void drawTrendArrow(Canvas&, int x, int bottomY, int w, int h, int dir, Color);
+
 }  // namespace epd

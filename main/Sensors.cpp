@@ -27,8 +27,11 @@ esp_err_t Sensors::onMessage(MqttClient*, const std::string& topic,
   b->dest->value = static_cast<float>(v);
   b->dest->at = time(nullptr);
   b->dest->everSeen = true;
+  const Settings& s = b->self->settings_;
+  b->dest->updateTrend(s.trendWinMin, s.trendTenths);
   ++b->self->messages_;
-  ESP_LOGI(TAG, "%s %s=%.1f", b->name, b->field->c_str(), v);
+  ESP_LOGI(TAG, "%s %s=%.1f (%s)", b->name, b->field->c_str(), v,
+           trendName(b->dest->trend));
 
   // Wake the display task so it can decide whether this actually changed what is
   // drawn. It compares the FORMATTED strings, so a 0.01 degC wobble that does not

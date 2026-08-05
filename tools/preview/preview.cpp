@@ -35,6 +35,9 @@ constexpr int kOutsideLabelBaseline = 60;
 constexpr int kOutsideTempBaseline = 72;
 constexpr int kFcBaseline = 94;
 constexpr int kDateBaseline = 116;
+constexpr int kArrowW = 21;
+constexpr int kArrowH = 30;
+constexpr int kArrowGap = 10;
 
 class MemCanvas final : public epd::Canvas {
  public:
@@ -163,33 +166,69 @@ int main() {
     printf("  %-20s forecast bottom=%d  date top=%d  %s\n", "small-line sep",
            fcBot, dTop, ok ? "ok" : "*** LINES COLLIDE ***");
   }
+  // The arrow column must fit between the wider of the two labels and the LEFT
+  // edge of the widest reading, or the arrow is silently dropped. Checked here
+  // rather than eyeballed, because dropping it is a legitimate fallback for long
+  // custom labels and would otherwise pass unnoticed with the defaults.
+  printf("\ntrend arrow column\n");
+  {
+    const int labelW = epd::measureText(epd::Font_Label, "OUT").advance;
+    const int arrowX = 4 + labelW + kArrowGap;
+    const int tempLeft = kTempRightX - epd::measureText(epd::Font_Big, "-12.4").advance;
+    const bool ok = arrowX + kArrowW + kArrowGap <= tempLeft;
+    if (!ok) ++fails;
+    printf("  %-20s x=%d..%d  widest number starts at %d  %s\n", "IN/OUT labels",
+           arrowX, arrowX + kArrowW, tempLeft,
+           ok ? "ok" : "*** ARROW WILL BE DROPPED ***");
+    // Vertical: the arrow is bottom-aligned to the temperature baseline, so it
+    // reaches kArrowH-1 above it. It must not climb into the row above.
+    const int top = kInsideTempBaseline - kArrowH + 1;
+    const bool vok = top >= 0 && kOutsideTempBaseline - kArrowH + 1 >
+                                     kInsideTempBaseline;
+    if (!vok) ++fails;
+    printf("  %-20s inside y=[%d..%d] outside y=[%d..%d] %s\n", "vertical",
+           top, kInsideTempBaseline, kOutsideTempBaseline - kArrowH + 1,
+           kOutsideTempBaseline, vok ? "ok" : "*** ARROWS COLLIDE ***");
+  }
+
   struct Case { const char* name; ScreenModel m; };
   std::vector<Case> cases;
 
   auto mk = [](const char* name, const char* inL, const char* inT, bool inV,
-               const char* outL, const char* outT, bool outV,
-               const char* fc, const char* date, const char* rain) {
+               Trend inTr, const char* outL, const char* outT, bool outV,
+               Trend outTr, const char* fc, const char* date, const char* rain) {
     Case c{name, {}};
     snprintf(c.m.insideLabel, sizeof c.m.insideLabel, "%s", inL);
     snprintf(c.m.insideTemp, sizeof c.m.insideTemp, "%s", inT);
     c.m.insideValid = inV;
+    c.m.insideTrend = inTr;
     snprintf(c.m.outsideLabel, sizeof c.m.outsideLabel, "%s", outL);
     snprintf(c.m.outsideTemp, sizeof c.m.outsideTemp, "%s", outT);
     c.m.outsideValid = outV;
+    c.m.outsideTrend = outTr;
     snprintf(c.m.forecast, sizeof c.m.forecast, "%s", fc);
     snprintf(c.m.date, sizeof c.m.date, "%s", date);
     snprintf(c.m.rain, sizeof c.m.rain, "%s", rain);
     return c;
   };
 
-  cases.push_back(mk("normal", "IN", "21.4", true, "OUT", "7.8", true,
-                     "Partly cloudy 6/17", "Wed 5 Aug", "rain 10%"));
-  cases.push_back(mk("widest", "IN", "-12.4", true, "OUT", "100.0", true,
-                     "Heavy showers -9/45", "Wed 28 May", "rain 100%"));
-  cases.push_back(mk("no-mqtt", "IN", "--", false, "OUT", "--", false,
-                     "Clear 6/17", "", ""));
-  cases.push_back(mk("lounge", "IN", "19.0", true, "OUT", "3.2", true,
-                     "Heavy drizzle 2/11", "Sat 12 Jul", "rain 90%"));
+  cases.push_back(mk("normal", "IN", "21.4", true, Trend::Rising, "OUT", "7.8",
+                     true, Trend::Falling, "Partly cloudy 6/17", "Wed 5 Aug",
+                     "rain 10%"));
+  cases.push_back(mk("widest", "IN", "-12.4", true, Trend::Falling, "OUT",
+                     "100.0", true, Trend::Rising, "Heavy showers -9/45",
+                     "Wed 28 May", "rain 100%"));
+  cases.push_back(mk("no-mqtt", "IN", "--", false, Trend::Unknown, "OUT", "--",
+                     false, Trend::Unknown, "Clear 6/17", "", ""));
+  // Steady (measured flat) and Unknown (no history yet) are both blank, so this
+  // case must render with an empty arrow column on both rows.
+  cases.push_back(mk("steady", "IN", "19.0", true, Trend::Steady, "OUT", "3.2",
+                     true, Trend::Unknown, "Heavy drizzle 2/11", "Sat 12 Jul",
+                     "rain 90%"));
+  // Long labels squeeze the arrow column; the number must still be intact.
+  cases.push_back(mk("longlabel", "LOUNGE", "19.0", true, Trend::Rising,
+                     "OUTSIDE", "-12.4", true, Trend::Falling, "Clear 2/11",
+                     "Sat 12 Jul", "rain 90%"));
   {
     Case c{"banner", {}};
     c.m.banner = "einkweather";

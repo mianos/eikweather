@@ -132,11 +132,20 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("inside_value", in.value);
   json.AddItem("inside_age_s", in.everSeen ? static_cast<int>(now - in.at) : -1);
   json.AddItem("inside_fresh", in.fresh(settings_.sensorStaleMin));
+  // trend_age_s is how long the current anchor has been held: an "unknown" trend
+  // with an age below trend_win_min * 60 just means not enough history yet, which
+  // is a very different diagnosis from a sensor that is not publishing.
+  json.AddItem("inside_trend", trendName(in.trend));
+  json.AddItem("inside_trend_age_s",
+               in.refAt ? static_cast<int>(now - in.refAt) : -1);
   json.AddItem("outside_topic", settings_.outsideTopic);
   json.AddItem("outside_seen", out.everSeen);
   json.AddItem("outside_value", out.value);
   json.AddItem("outside_age_s", out.everSeen ? static_cast<int>(now - out.at) : -1);
   json.AddItem("outside_fresh", out.fresh(settings_.sensorStaleMin));
+  json.AddItem("outside_trend", trendName(out.trend));
+  json.AddItem("outside_trend_age_s",
+               out.refAt ? static_cast<int>(now - out.refAt) : -1);
 
   json.AddItem("panel_w", settings_.panelW);
   json.AddItem("panel_h", settings_.panelH);

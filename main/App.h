@@ -5,6 +5,7 @@
 #include "WeatherClient.h"
 
 class WiFiManager;
+class MqttClient;
 
 // Everything the display task and the web handlers both need. Single-owner by
 // design: the display task is the ONLY writer of `weather`, so there is no mutex
@@ -15,6 +16,9 @@ struct App {
   WeatherClient* weather;
   Sensors* sensors;
   WiFiManager* wifi;
+  // Started by the display task once there is an IP, not by app_main — see the
+  // comment at that call site.
+  MqttClient* mqtt;
 
   Weather current{};
 

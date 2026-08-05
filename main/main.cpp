@@ -31,6 +31,7 @@
 #include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -63,6 +64,17 @@ void onGotIp(void*, esp_event_base_t, int32_t, void*) {
 void onSntpSync(struct timeval* tv) {
   ESP_LOGI(TAG, "sntp: time synced (epoch %lld)",
            static_cast<long long>(tv->tv_sec));
+}
+
+// Do we actually have a DHCP lease? Deliberately STATE-based (interrogate the
+// netif) rather than event-based: anything created after WiFiManager may already
+// have missed a one-shot IP_EVENT_STA_GOT_IP, and a missed edge here would mean
+// waiting out the whole timeout for a network that is already up.
+bool haveIp() {
+  esp_netif_t* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (!sta) return false;
+  esp_netif_ip_info_t ip{};
+  return esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr != 0;
 }
 
 void validateLatLon(const Settings& s) {
@@ -142,13 +154,17 @@ void drawRotationProbe(epd::Panel& p) {
 // display repaints rarely, so a plausible but hours-old number is worse than
 // visibly having no number.
 void formatReading(const Reading& r, int staleMin, char* out, size_t n,
-                   bool* valid) {
+                   bool* valid, Trend* trend) {
   if (r.fresh(staleMin)) {
     snprintf(out, n, "%.1f", r.value);
     *valid = true;
+    *trend = r.trend;
   } else {
     snprintf(out, n, "%s", "--");
     *valid = false;
+    // No number to qualify, so no arrow. Also stops a dead sensor's last known
+    // direction sitting on the glass indefinitely.
+    *trend = Trend::Unknown;
   }
 }
 
@@ -158,9 +174,9 @@ void buildModel(const App& app, ScreenModel& m) {
   snprintf(m.insideLabel, sizeof m.insideLabel, "%s", s.insideLabel.c_str());
   snprintf(m.outsideLabel, sizeof m.outsideLabel, "%s", s.outsideLabel.c_str());
   formatReading(app.sensors->inside(), s.sensorStaleMin, m.insideTemp,
-                sizeof m.insideTemp, &m.insideValid);
+                sizeof m.insideTemp, &m.insideValid, &m.insideTrend);
   formatReading(app.sensors->outside(), s.sensorStaleMin, m.outsideTemp,
-                sizeof m.outsideTemp, &m.outsideValid);
+                sizeof m.outsideTemp, &m.outsideValid, &m.outsideTrend);
 
   // "<condition> <lo>/<hi>" on the forecast line; the rain chance goes on the date
   // line, labelled, because a bare trailing "0%" did not say what it measured.
@@ -208,12 +224,15 @@ bool complete(const ScreenModel& m) {
 // repaint is worth 20+ seconds of flashing — far more robust than a temperature
 // delta threshold, because it is exactly the question "would the screen differ?".
 bool sameAsDrawn(const ScreenModel& a, const ScreenModel& b) {
+  // The trends are compared too, so a direction change earns a repaint on its
+  // own. Bounded by construction: Reading::updateTrend re-evaluates at most once
+  // per trend_win_min, so this can add at most two repaints per window.
   return strcmp(a.insideLabel, b.insideLabel) == 0 &&
          strcmp(a.insideTemp, b.insideTemp) == 0 &&
-         a.insideValid == b.insideValid &&
+         a.insideValid == b.insideValid && a.insideTrend == b.insideTrend &&
          strcmp(a.outsideLabel, b.outsideLabel) == 0 &&
          strcmp(a.outsideTemp, b.outsideTemp) == 0 &&
-         a.outsideValid == b.outsideValid &&
+         a.outsideValid == b.outsideValid && a.outsideTrend == b.outsideTrend &&
          strcmp(a.forecast, b.forecast) == 0 && strcmp(a.date, b.date) == 0 &&
          strcmp(a.rain, b.rain) == 0;
 }
@@ -245,6 +264,21 @@ void displayTask(void* arg) {
     m.banner2 = "Run ESP-Touch v2 to set up WiFi";
     paint(app, m);
   }
+
+  // MQTT is started HERE, not at the end of app_main, because app_main finishes
+  // roughly a second BEFORE DHCP hands over the lease. Starting the client then
+  // guaranteed a failed connect —
+  //     esp-tls: couldn't get hostname for :mqtt2.mianos.com: getaddrinfo() 202
+  // — and the first reading then had to wait out esp-mqtt's 10 s reconnect
+  // backoff. Nothing was broken, but the first useful paint was 10 s late for no
+  // reason. The client is created in app_main and its subscriptions are already
+  // queued (MqttClient::subscribe replays them from resubscribe() on connect),
+  // so all that is deferred is the connect itself.
+  for (int i = 0; i < 240 && !haveIp(); ++i) vTaskDelay(pdMS_TO_TICKS(250));
+  if (!haveIp()) {
+    ESP_LOGW(TAG, "no IP after 60 s — starting MQTT anyway, it will keep retrying");
+  }
+  app.mqtt->start();
 
   // Wait for a plausible clock before the first weather fetch: mbedTLS cannot
   // validate the certificate without one.
@@ -322,9 +356,11 @@ void displayTask(void* arg) {
       lastPaintUs = esp_timer_get_time();
       app.lastStackHighWater =
           static_cast<int32_t>(uxTaskGetStackHighWaterMark(nullptr));
-      ESP_LOGI(TAG, "painted %s %s | %s %s | %s | heap %u min %u | stack %d",
-               want.insideLabel, want.insideTemp, want.outsideLabel,
-               want.outsideTemp, want.forecast,
+      ESP_LOGI(TAG,
+               "painted %s %s %s | %s %s %s | %s | heap %u min %u | stack %d",
+               want.insideLabel, want.insideTemp, trendName(want.insideTrend),
+               want.outsideLabel, want.outsideTemp,
+               trendName(want.outsideTrend), want.forecast,
                static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()),
                static_cast<int>(app.lastStackHighWater));
@@ -398,7 +434,7 @@ extern "C" void app_main(void) {
 
   static WeatherClient weather(settings);
   static Sensors sensors(settings, nullptr);  // notify handle set below
-  static App app{&settings, &panel, &weather, &sensors, &wifi};
+  static App app{&settings, &panel, &weather, &sensors, &wifi, nullptr};
 
   auto reconfigure = [] {
     panel.configure(settings.panelW, settings.panelH,
@@ -431,20 +467,24 @@ extern "C" void app_main(void) {
   }
 
   xTaskCreate(otaVerifyTask, "ota_verify", 4096, nullptr, 4, nullptr);
-  // Stack 8192: the mbedTLS handshake dominates. Priority 4 is far below Wi-Fi
-  // (23) and lwIP (18), and the ~25 s blocking refresh yields continuously via
-  // waitBusy_'s vTaskDelay.
-  xTaskCreatePinnedToCore(displayTask, "display", 8192, &app, 4, &s_displayTask, 1);
-  sensors.setNotify(s_displayTask);
 
-  // MQTT last: its handlers notify the display task, which must exist first.
+  // MQTT is CONSTRUCTED and subscribed here but NOT started — the display task
+  // starts it once there is an IP. So it must exist before that task is created,
+  // or the task could dereference a null app.mqtt. Constructing the client only
+  // calls esp_mqtt_client_init; nothing touches the network until start().
   static esp_mqtt_client_config_t mqttCfg = {};
   static std::string broker = "mqtt://" + settings.mqttServer + ":" +
                               std::to_string(settings.mqttPort);
   mqttCfg.broker.address.uri = broker.c_str();
   static MqttClient mqtt(mqttCfg, settings.sensorName);
-  sensors.attach(mqtt);
-  mqtt.start();
+  sensors.attach(mqtt);  // queues the subscriptions; replayed on connect
+  app.mqtt = &mqtt;
+
+  // Stack 8192: the mbedTLS handshake dominates. Priority 4 is far below Wi-Fi
+  // (23) and lwIP (18), and the ~25 s blocking refresh yields continuously via
+  // waitBusy_'s vTaskDelay.
+  xTaskCreatePinnedToCore(displayTask, "display", 8192, &app, 4, &s_displayTask, 1);
+  sensors.setNotify(s_displayTask);
 
   if (settings.enableWeb) {
     static WebContext webctx(&wifi);

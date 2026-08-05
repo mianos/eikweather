@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Canvas.h"
+#include "Trend.h"
 
 // The POD boundary between "what to show" (decided in main.cpp, needs MQTT and
 // the weather fetch) and "how to draw it" (Layout.cpp, pure pixels).
@@ -19,13 +20,19 @@ struct ScreenModel {
   // Font_Label, "OUTSIDE" is 107px, which left only 108px for the temperature and
   // made "-12.4" (118px) and "100.0" (130px) overflow. Short labels give the
   // number a 158px budget, which fits every plausible reading.
+  //
+  // The trend arrow is drawn in the gap the short labels leave between the label
+  // and the right-aligned digits — space that was previously dead. Only Rising
+  // and Falling mark the screen; Steady and Unknown leave it blank.
   char insideLabel[12] = {};   // "IN" / "LOUNGE" if you prefer, and accept clipping
   char insideTemp[10] = {};
   bool insideValid = false;    // false => draw no degree ring
+  Trend insideTrend = Trend::Unknown;
 
   char outsideLabel[12] = {};  // "OUT"
   char outsideTemp[10] = {};
   bool outsideValid = false;
+  Trend outsideTrend = Trend::Unknown;
 
   // ONE line under the rule, shared: forecast on the left, date on the right.
   // Not two lines — the band between the rule and the bottom edge is 25px, and two

@@ -47,6 +47,18 @@ struct Settings : SettingsBase {
   // 0 disables the staleness check.
   int sensorStaleMin = 30;
 
+  // --- rise / fall arrow ------------------------------------------------
+  // The arrow compares the current reading against the one from trendWinMin ago,
+  // and only claims a direction once the move exceeds trendTenths tenths of a
+  // degree. Both are deliberately coarse: this is a "is it warming up or cooling
+  // down" glance, and every change of the arrow costs a full ~20 s repaint, so a
+  // twitchy indicator would be worse than none.
+  //
+  // Consequence of the 30 min window: no arrow for the first half hour after a
+  // reboot. That is intentional — see Trend::Unknown.
+  int trendWinMin = 30;
+  int trendTenths = 3;  // 0.3 degC
+
   // --- refresh cadence --------------------------------------------------
   // This is a WEATHER display, not a clock: it repaints only when the drawn
   // content actually CHANGES, rather than on a timer. The comparison is done on
@@ -103,6 +115,8 @@ struct Settings : SettingsBase {
     field("outside_field", outsideField);
     field("outside_label", outsideLabel);
     field("sensor_stale_min", sensorStaleMin);
+    field("trend_win_min", trendWinMin);
+    field("trend_tenths", trendTenths);
     field("min_interval_min", minIntervalMin);
     field("weather_poll_min", weatherPollMin);
     field("boot_screen", bootScreen);
