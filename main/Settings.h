@@ -89,6 +89,30 @@ struct Settings : SettingsBase {
   int trendWinMin = 10;
   int trendTenths = 1;  // 0.1 degC — one displayed digit
 
+  // --- stale-data alert -------------------------------------------------
+  // A red "!" in the top-right corner once any source that WAS working has gone
+  // quiet for this long. 0 disables it.
+  //
+  // An hour rather than sensor_stale_min's 30 because the two answer different
+  // questions. sensor_stale_min blanks ONE reading to "--" the moment its own
+  // number stops being trustworthy. This is the screen-level "nothing here is
+  // current any more" mark — and it is the ONLY age indication for the forecast,
+  // which otherwise renders a 12-hour-old condition identically to a fresh one
+  // (app.current keeps last-known-good indefinitely, by design, so that a failed
+  // fetch never costs you the rest of the screen).
+  //
+  // A source that is unconfigured, or has never been seen at all, does not count.
+  // An empty topic is a choice, and a configured-but-silent one already shows "--"
+  // or "forecast unavailable", which says more than a 4px mark in a corner can.
+  // The mark therefore means specifically "this was working and has stopped".
+  //
+  // What it CANNOT tell you is that the board is dead: e-paper holds its last
+  // image with no power at all, and a wedged device cannot draw a warning about
+  // itself. This covers MQTT, Wi-Fi and the weather API failing underneath a
+  // display task that is still running, which is the common case but is not a
+  // heartbeat.
+  int alertAgeMin = 60;
+
   // --- refresh cadence --------------------------------------------------
   // This is a WEATHER display, not a clock: it repaints only when the drawn
   // content actually CHANGES, rather than on a timer. The comparison is done on
@@ -166,6 +190,7 @@ struct Settings : SettingsBase {
     field("sensor_stale_min", sensorStaleMin);
     field("trend_win_min", trendWinMin);
     field("trend_tenths", trendTenths);
+    field("alert_age_min", alertAgeMin);
     field("min_interval_min", minIntervalMin);
     field("weather_poll_min", weatherPollMin);
     field("boot_screen", bootScreen);

@@ -61,6 +61,15 @@ struct ScreenModel {
   // forecast was unreadable — nothing said what it was a percentage of.
   char rain[16] = {};      // "rain 0%", empty when the API returns no probability
 
+  // Some source that WAS working has gone quiet for alert_age_min — draw a red "!"
+  // in the top-right corner. See the long note in Settings.h for exactly what
+  // counts, and what this deliberately cannot detect.
+  //
+  // One bool rather than which-source-failed: the corner is 7px wide, which is
+  // enough to say "look at /healthz" and nothing more. /healthz carries every
+  // individual age, so the mark's job is only to make you go and look.
+  bool alert = false;
+
   // Non-null => draw the boot / provisioning screen instead of the readings.
   const char* banner = nullptr;
   const char* banner2 = nullptr;

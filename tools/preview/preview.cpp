@@ -40,6 +40,8 @@ constexpr int kArrowW = 23;
 constexpr int kArrowH = kArrowW / 2 + 1;  // 45-degree edges fix the height
 constexpr int kArrowGap = 10;
 constexpr int kArrowLift = 10;
+constexpr int kAlertX = 241;
+constexpr int kAlertBaseline = 19;
 
 class MemCanvas final : public epd::Canvas {
  public:
@@ -51,6 +53,13 @@ class MemCanvas final : public epd::Canvas {
     px_[static_cast<size_t>(y) * kW + x] = static_cast<uint8_t>(c);
   }
   void clear() { memset(px_, static_cast<int>(epd::Color::White), sizeof px_); }
+
+  // Off-panel reads as White so callers can probe a neighbourhood at the edges
+  // without special-casing. Used by the alert-mark isolation check.
+  epd::Color at(int x, int y) const {
+    if (x < 0 || y < 0 || x >= kW || y >= kH) return epd::Color::White;
+    return static_cast<epd::Color>(px_[static_cast<size_t>(y) * kW + x]);
+  }
 
   void writePpm(const char* path) const {
     FILE* f = fopen(path, "wb");
@@ -255,6 +264,38 @@ int main() {
            kOutsideTempBaseline - kArrowLift, vok ? "ok" : "*** ARROWS COLLIDE ***");
   }
 
+  // The stale-data "!" lives in the ONLY region of this screen that is free by
+  // construction rather than by luck: right of the degree ring, above the rule.
+  // Both halves of that claim are asserted, because the mark is drawn
+  // unconditionally with no fallback — unlike the trend arrow, which measures and
+  // drops itself. If it ever overlaps, it overlaps in silence on the glass.
+  printf("\nstale-data alert mark\n");
+  {
+    const epd::TextMetrics bang = epd::measureText(epd::Font_Label, "!");
+    // Ink, not advance: the glyph is inset from its origin, which is what makes
+    // 4px of ink fit a 7px column.
+    const int inkL = kAlertX + bang.inkLeft;
+    const int inkR = kAlertX + bang.inkRight;
+    // The widest possible thing to its left is a big reading's degree ring, whose
+    // right edge is fixed by kTempRightX regardless of how wide the number is.
+    const int ringRight = kTempRightX + 2 + 2 * 4;  // kDegreeR = 4
+    const bool hok = inkL > ringRight && inkR <= kW - 1;
+    if (!hok) ++fails;
+    printf("  %-20s ink x=%d..%d  ring ends at %d  panel edge %d  %s\n",
+           "horizontal", inkL, inkR, ringRight, kW - 1,
+           hok ? "ok" : "*** ALERT MARK COLLIDES ***");
+    const int inkT = kAlertBaseline + bang.inkTop;
+    const int inkB = kAlertBaseline + bang.inkBottom;
+    // Must clear the rule, and must not run off the top edge. Aligning its top with
+    // the inside digits' cap top is a deliberate choice, so that is checked too
+    // rather than left to drift if a font is regenerated.
+    const int capTop = kInsideTempBaseline + epd::measureText(epd::Font_Big, "21.4").inkTop;
+    const bool vok = inkT >= 0 && inkB < 76;
+    if (!vok) ++fails;
+    printf("  %-20s ink y=%d..%d  rule at 76  digit cap top=%d%s  %s\n", "vertical",
+           inkT, inkB, capTop, inkT == capTop ? " (aligned)" : " (NOT aligned)",
+           vok ? "ok" : "*** ALERT MARK OUT OF BAND ***");
+  }
   struct Case { const char* name; ScreenModel m; };
   std::vector<Case> cases;
 
@@ -296,6 +337,52 @@ int main() {
   cases.push_back(mk("longlabel", "LOUNGE", "19.0", true, Trend::Rising,
                      "OUTSIDE", "-12.4", true, Trend::Falling, "Clear 2/11",
                      "Sat 12 Jul", "rain 90%", "HWS 48"));
+  // The alert on the WIDEST content, not on typical content: the mark has no
+  // fallback (unlike the trend arrow, which measures and drops itself), so the case
+  // that matters is the one where everything else is at maximum extent and the
+  // corner is under the most pressure.
+  {
+    Case c = mk("alert", "IN", "-12.4", true, Trend::Falling, "OUT", "100.0", true,
+                Trend::Rising, "Heavy showers -9/45", "Wed 28 May", "rain 100%",
+                "100");
+    c.m.alert = true;
+    cases.push_back(c);
+
+    // The bounding-box checks above can pass while the glyphs still visually
+    // collide: the degree ring's right edge reaches x=242 and the mark's ink starts
+    // at 243, so a box check only proves they do not OVERLAP, not that there is any
+    // daylight between them. Assert the real invariant — render with and without
+    // the mark, and require every pixel it adds to be at least 2px from any
+    // pre-existing ink, diagonals included.
+    ScreenModel without = c.m;
+    without.alert = false;
+    MemCanvas a, b;
+    renderScreen(a, without);
+    renderScreen(b, c.m);
+    int added = 0, minGap = 99;
+    for (int y = 0; y < kH; ++y) {
+      for (int x = 0; x < kW; ++x) {
+        if (a.at(x, y) == b.at(x, y)) continue;
+        ++added;
+        for (int d = 1; d < minGap; ++d) {
+          bool hit = false;
+          for (int dy = -d; dy <= d && !hit; ++dy) {
+            for (int dx = -d; dx <= d && !hit; ++dx) {
+              // Ring of radius d only — inner rings were tested on earlier passes.
+              if (dx != d && dx != -d && dy != d && dy != -d) continue;
+              if (a.at(x + dx, y + dy) != epd::Color::White) hit = true;
+            }
+          }
+          if (hit) { minGap = d; break; }
+        }
+      }
+    }
+    // minGap == 1 means directly adjacent to existing ink, which reads as touching.
+    const bool ok = added > 0 && minGap >= 2;
+    if (!ok) ++fails;
+    printf("  %-20s %d px added, nearest other ink %d px  %s\n", "isolation", added,
+           minGap, ok ? "ok" : "*** ALERT MARK TOUCHES OTHER INK ***");
+  }
   {
     Case c{"banner", {}};
     c.m.banner = "einkweather";

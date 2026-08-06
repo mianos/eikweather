@@ -168,6 +168,14 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("water_trend_age_s",
                hw.refAt ? static_cast<int>(now - hw.refAt) : -1);
 
+  // The red "!" in the top-right corner. Reported right after the per-source ages
+  // above, because those are the answer to "why is it on": whichever of
+  // inside/outside/water/weather has an age past alert_age_min * 60 and was once
+  // seen. A source that has NEVER been seen never triggers it — that case shows as
+  // "--" on the glass instead.
+  json.AddItem("alert", app_.alertActive);
+  json.AddItem("alert_age_min", settings_.alertAgeMin);
+
   json.AddItem("panel_w", settings_.panelW);
   json.AddItem("panel_h", settings_.panelH);
   json.AddItem("rotation", settings_.rotation);

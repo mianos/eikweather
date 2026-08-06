@@ -87,6 +87,27 @@ constexpr int kSmallDegreeR = 2;
 constexpr int kRightMargin = 4;
 constexpr int kPassengerGap = 8;  // clearance between a line's two items
 
+// Stale-data alert: a red "!" in the top-right corner.
+//
+// That corner is the only space on this screen that is free by CONSTRUCTION rather
+// than by luck. The big readings right-align at kTempRightX (232) and their degree
+// ring ends at 242, so nothing above the rule can ever reach x=243..249 — 7px wide
+// by 76px tall. Everything else that looks empty is only the width that a
+// particular date, forecast or label happened to leave: taking the union of inked
+// pixels across every tools/preview case, the next-largest guaranteed-free box is
+// 12px wide and it narrows further as labels lengthen. This is why the alert is a
+// corner mark and not a badge on the date line.
+//
+// Font_Label's '!' rather than hand-drawn rectangles: Font_Label covers all of
+// 0x20..0x7E, so a properly tapered exclamation mark already exists. Measured, its
+// ink is 4px wide and 17px tall, sitting at +2..+5 from the text origin — so an
+// origin of 241 puts the ink at 243..246, inside the column with 3px to spare.
+//
+// The baseline puts the top of the '!' at y=3, which is exactly the cap top of the
+// inside digits, so it reads as aligned to the row rather than floating in space.
+constexpr int kAlertX = 241;        // ink lands at x=243..246
+constexpr int kAlertBaseline = 19;  // ink spans y=3..19
+
 // x of the shared arrow column: past the WIDER of the two labels, so it clears
 // both. Clamped to kLabelMaxW because that is where drawTextClipped truncates.
 int arrowColumn(const ScreenModel& m) {
@@ -162,6 +183,14 @@ void renderScreen(epd::Canvas& c, const ScreenModel& m) {
   drawReading(c, m.outsideLabel, kOutsideLabelBaseline, m.outsideTemp,
               kOutsideTempBaseline, m.outsideValid, m.outsideTrend, arrowX,
               epd::Color::Red);
+
+  // Red, making three red things on the screen (outside temperature, rule, alert)
+  // — the stated budget before the tri-colour stops reading as an accent. An alert
+  // is exactly what the third one should be spent on.
+  if (m.alert) {
+    epd::drawText(c, epd::Font_Label, kAlertX, kAlertBaseline, "!",
+                  epd::Color::Red);
+  }
 
   epd::fillRect(c, 0, kSepY, c.width(), kSepH, epd::Color::Red);
 

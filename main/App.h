@@ -25,6 +25,11 @@ struct App {
   // Diagnostics surfaced on GET /healthz.
   uint32_t renderCount = 0;
   int32_t lastStackHighWater = 0;
+  // Last computed stale-data alert state. Written by the display task on every
+  // pass (whether or not it repaints) and only read by the web server, so it keeps
+  // App's single-writer contract. Surfaced so that "why is there a bang on my
+  // screen" is answerable from /healthz, next to the per-source ages that caused it.
+  bool alertActive = false;
 
   // Set by the web server to request a one-off test pattern on the next wake.
   // 0 = none, otherwise a TestPattern value.

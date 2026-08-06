@@ -149,6 +149,93 @@ marks line up vertically. If a long custom label plus a wide reading (`LOUNGE` +
 the decoration, the temperature is the point. `tools/preview` asserts the column
 fits for the default labels rather than leaving it to be noticed on glass.
 
+## The stale-data alert
+
+A red `!` in the top-right corner once any source that **was** working has gone
+quiet for `alert_age_min` (default 60). It answers the question e-paper is
+structurally bad at: this panel holds its last image indefinitely, so `15.3°` looks
+exactly the same whether it arrived two minutes or two days ago.
+
+```
+                                             #      <- x=243..246, y=3..19
+   IN     /\              1 5 . 3 °         ##         red, Font_Label '!'
+                                            ##
+   OUT    \/              1 2 . 1 °          #
+========================================================
+   Partly cloudy 6/16                              43°
+   Thu 6 Aug                                 rain 0%
+```
+
+**It is not a heartbeat.** A wedged or unpowered board cannot draw a warning about
+itself, and the glass keeps the last picture either way. This covers MQTT, Wi-Fi and
+the weather API failing underneath a display task that is still running.
+
+### What counts
+
+Any of `inside`, `outside`, `water` or the **forecast** being older than the
+threshold. The forecast is the reason this exists: `app.current` deliberately keeps
+last-known-good forever so that a failed fetch never blanks the line, which means a
+12-hour-old `Partly cloudy 6/16` renders identically to a fresh one and there was
+previously no way at all to tell. The three readings are only *partly* covered by
+`sensor_stale_min`, which blanks an individual number to `--` after 30 minutes.
+
+A source that has **never** been seen does not count. An empty topic is a choice,
+and a configured-but-silent one already shows `--` or `forecast unavailable`, which
+says more than 4px of ink in a corner can.
+
+Two traps that shaped the implementation:
+
+- **It must key off data age, never off "time since last repaint."** That version
+  self-references: the mark appearing *is* a content change, so it triggers a
+  repaint, which makes the last repaint recent, which clears the mark, which is
+  another change. It flaps at ~25 s of flashing per flip. Keyed off data age the
+  worst case is two repaints per outage, one on and one off.
+- **Stamps recorded before SNTP sync are discarded** (`at < kPlausibleTime`). MQTT
+  starts before the clock is set, so the first readings can be stamped near the
+  epoch; the moment SNTP steps to the present, `now - at` is decades and every
+  source looks overdue. Without that guard the alert cries wolf once per boot.
+
+`sameAsDrawn()` compares the flag, or the mark would never earn a repaint and would
+only ever appear by riding along on some other change.
+
+### Why a corner mark and not a badge
+
+That corner is the only space on this screen that is free by **construction** rather
+than by luck. The readings right-align at `kTempRightX` (232) and their degree ring
+ends at 242, so nothing above the rule can ever reach `x=243..249` — 7 × 76 px.
+
+Everything else that looks empty is only what a particular date, forecast or label
+happened to leave. Taking the union of inked pixels across every `tools/preview`
+case, the screen is 51% covered and the next-largest guaranteed-free box is 12 px
+wide, narrowing further as labels lengthen. The date line does have ~35 px of slack
+(widest date `Wed 28 May` = 113 px, widest `rain 100%` = 90 px, 8 px gap, against
+246 px), which would fit a 14 px warning triangle — but it would then be competing
+with text, and the corner competes with nothing.
+
+7 px sounds too narrow for a glyph until you measure one: `Font_Label` covers all of
+`0x20..0x7E`, so a properly tapered `!` already exists, and its **ink is only 4 px
+wide** (advance 8, ink inset at +2..+5) by 17 px tall. No hand-drawn rectangles
+needed. The baseline puts its top at `y=3`, exactly the cap top of the inside digits,
+so it reads as aligned to the row rather than floating.
+
+`tools/preview` asserts the geometry three ways, the third because the first two are
+not enough: bounding boxes can pass while the glyphs visually collide, since the ring
+ends at 242 and the ink starts at 243. So it also renders the widest case with and
+without the mark and requires **every added pixel to be ≥2 px from any pre-existing
+ink, diagonals included**. Verified end to end against the device's own
+`GET /screen.pbm`: 51 px at `x=243..246, y=3..19`, identical to the host render.
+
+### Testing it without waiting an hour
+
+```
+curl -X POST -d '{"alert_age_min":1}' http://<host>/config   # fires within a minute
+curl -X POST -d '{"alert_age_min":60}' http://<host>/config  # back to normal
+```
+
+`/healthz` flips `alert` immediately; the glass follows once `min_interval_min`
+allows, so allow up to 10 minutes for the repaint. `alert` and `alert_age_min` sit
+next to the per-source ages there, which are the answer to "why is it on".
+
 ## Hardware
 
 Confirmed with `esptool -p /dev/cu.usbserial-1440 flash-id`: **ESP32-D0WD-V3 rev
@@ -389,6 +476,8 @@ plus:
   `ESP_ERR_HTTP_CONNECT` on the first post-boot fetch was identified.
 - `inside_topic` / `outside_topic` and `mqtt_messages`, enough to diagnose a wrong
   topic or field name without a serial cable.
+- `alert` and `alert_age_min`, immediately after the per-source ages that cause it —
+  so "why is there a bang on my screen" is one request, not a deduction.
 - `cpu_max_mhz` / `cpu_min_mhz` / `light_sleep` / `wifi_ps`, read back from the
   **driver** rather than from settings, so a `light_sleep: 1` setting against a
   build that lost `CONFIG_PM_ENABLE` is visible rather than silent.
@@ -406,6 +495,7 @@ plus:
 | `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
 | `trend_win_min` / `trend_tenths` | `10` / `1` | rise/fall window, and deadband in tenths of a degree |
+| `alert_age_min` | `60` | red `!` once a working source goes quiet this long; `0` disables — see [above](#the-stale-data-alert) |
 | `water_topic` / `water_field` | `""` / `temperature` | optional third reading; empty => not drawn at all |
 | `water_label` | `""` | empty on purpose — a label truncates the forecast, see below |
 | `min_interval_min` | `10` | rate-limits repaints, clamped to >=3 |

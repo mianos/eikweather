@@ -218,6 +218,23 @@ void formatReading(const Reading& r, int staleMin, char* out, size_t n,
   }
 }
 
+// Has a source that WAS working gone quiet for alertAgeMin?
+//
+// Never-seen sources return false on purpose: a configured-but-silent topic already
+// shows "--", and an unconfigured one is a choice. So the mark means specifically
+// "this was working and has stopped" — see the note in Settings.h.
+//
+// The kPlausibleTime guard on `at` is not paranoia. MQTT is started before SNTP has
+// synced, so the first readings can be stamped near the epoch; the moment the clock
+// steps to the present, now - at is decades and EVERY source would look overdue.
+// Discarding pre-SNTP stamps costs nothing — a fresh sample restamps within
+// minutes — and it is the difference between this being trustworthy and it crying
+// wolf once per boot.
+bool overdue(bool everSeen, time_t at, time_t now, int alertAgeMin) {
+  if (!everSeen || at < kPlausibleTime || now < kPlausibleTime) return false;
+  return (now - at) > static_cast<time_t>(alertAgeMin) * 60;
+}
+
 void buildModel(const App& app, ScreenModel& m) {
   const Settings& s = *app.settings;
 
@@ -282,6 +299,20 @@ void buildModel(const App& app, ScreenModel& m) {
     strftime(mon, sizeof mon, "%b", &t);
     snprintf(m.date, sizeof m.date, "%s %d %s", wd, t.tm_mday, mon);
   }
+
+  // Stale-data alert, checked against every source INCLUDING the forecast — which
+  // is the only one with no other way to show its age, since app.current keeps
+  // last-known-good indefinitely so that a failed fetch never blanks the line.
+  if (s.alertAgeMin > 0) {
+    const Reading& in = app.sensors->inside();
+    const Reading& out = app.sensors->outside();
+    const Reading& hw = app.sensors->water();
+    m.alert = overdue(in.everSeen, in.at, now, s.alertAgeMin) ||
+              overdue(out.everSeen, out.at, now, s.alertAgeMin) ||
+              overdue(hw.everSeen, hw.at, now, s.alertAgeMin) ||
+              overdue(app.current.valid, app.current.fetchedAt, now,
+                      s.alertAgeMin);
+  }
 }
 
 // Is the screen showing everything it is meant to? Used to let the very first
@@ -309,7 +340,15 @@ bool sameAsDrawn(const ScreenModel& a, const ScreenModel& b) {
          strcmp(a.outsideTemp, b.outsideTemp) == 0 &&
          a.outsideValid == b.outsideValid && a.outsideTrend == b.outsideTrend &&
          strcmp(a.forecast, b.forecast) == 0 && strcmp(a.date, b.date) == 0 &&
-         strcmp(a.rain, b.rain) == 0 && strcmp(a.water, b.water) == 0;
+         strcmp(a.rain, b.rain) == 0 && strcmp(a.water, b.water) == 0 &&
+         // Without this the alert would never earn a repaint and so would never
+         // appear except by riding along on some other change.
+         //
+         // It cannot self-trigger, because it is derived from DATA age rather than
+         // paint age: a mark keyed off "time since last repaint" would clear itself
+         // the moment it was drawn and then flap, at ~25 s of flashing per flip.
+         // Worst case here is two extra repaints per outage, one on and one off.
+         a.alert == b.alert;
 }
 
 void paint(App& app, const ScreenModel& m) {
@@ -414,6 +453,9 @@ void displayTask(void* arg) {
 
     ScreenModel want;
     buildModel(app, want);
+    // Every pass, not just on repaint: /healthz should report what is TRUE now, not
+    // what the glass happens to be showing while a change waits out the rate limit.
+    app.alertActive = want.alert;
 
     const bool changed = !everPainted || !sameAsDrawn(want, drawn);
     const int64_t sinceUs = nowUs - lastPaintUs;
@@ -432,10 +474,11 @@ void displayTask(void* arg) {
       app.lastStackHighWater =
           static_cast<int32_t>(uxTaskGetStackHighWaterMark(nullptr));
       ESP_LOGI(TAG,
-               "painted %s %s %s | %s %s %s | %s | %s | heap %u min %u | stack %d",
+               "painted %s %s %s | %s %s %s | %s | %s%s | heap %u min %u | stack %d",
                want.insideLabel, want.insideTemp, trendName(want.insideTrend),
                want.outsideLabel, want.outsideTemp,
                trendName(want.outsideTrend), want.water, want.forecast,
+               want.alert ? " | STALE(!)" : "",
                static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()),
                static_cast<int>(app.lastStackHighWater));
@@ -530,7 +573,7 @@ extern "C" void app_main(void) {
   // Anything that changes what is drawn or how often — takes effect immediately.
   for (const char* key : {"inside_label", "outside_label", "water_label",
                           "sensor_stale_min", "min_interval_min",
-                          "weather_poll_min"}) {
+                          "weather_poll_min", "alert_age_min"}) {
     settings.onChange(key, [] {
       if (s_displayTask) xTaskNotifyGive(s_displayTask);
     });
