@@ -31,4 +31,5 @@ idf_component_register(
       nvs_flash
       app_update           # OTA + rollback marking
       esp_timer
+      esp_pm                # DFS + automatic light sleep (esp_pm_configure)
       esp_driver_gpio)     # LED / button probe

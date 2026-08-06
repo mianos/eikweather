@@ -15,6 +15,41 @@ CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 # behind an e-paper panel is a feature.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 
+# --- power management / heat ---
+# This board is mains powered, so this is about running COOLER behind the panel,
+# not about runtime. Measured: the panel refreshes for 24.6 s once every ~10.6 min
+# (91 refreshes in 16.1 h), i.e. a 3.9% duty cycle — so for 96% of its life the
+# chip is doing nothing but holding a Wi-Fi association and an MQTT socket, at
+# roughly 30 mA. DFS plus automatic light sleep takes the idle term to single-digit
+# milliamps, estimated ~30 mA -> ~3-4 mA average.
+#
+# Deliberately light sleep and NOT deep sleep: the Wi-Fi association, the MQTT
+# subscription, the web API and OTA all keep working, and deep sleep would only
+# save another ~1-2 mA because the 3.9% refresh duty is an irreducible floor. See
+# the "Power and heat" section of the README for the full comparison.
+#
+# esp_pm_configure() is called from app_main (gated on the light_sleep setting), so
+# PM_DFS_INIT_AUTO is deliberately NOT set — one place decides the frequencies.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# 2.1 KB + 180 B of IRAM to sleep ~330 us longer per entry. Worth it here: with a
+# 100 Hz tick and a DTIM-driven Wi-Fi wake, sleep entry happens constantly, so
+# per-entry overhead is most of what is left to win.
+CONFIG_PM_SLP_IRAM_OPT=y
+CONFIG_PM_RTOS_IDLE_OPT=y
+#
+# NOT set, on purpose:
+#   PM_SLP_DISABLE_GPIO  — saves 200-300 uA by disabling every GPIO during sleep.
+#     That would drop panel RST low mid-refresh and reset the controller in the
+#     middle of a 24 s burn. Not worth 0.25 mA on a mains-powered device.
+#   PM_PROFILING         — debug only; adds overhead to every lock operation.
+#
+# NOTE: this board has no 32.768 kHz crystal (CONFIG_RTC_CLK_SRC_INT_RC), so sleep
+# timing comes from the internal 150 kHz RC oscillator. IDF calibrates it against
+# the crystal, but the residual error means Wi-Fi wakes with more margin before
+# each beacon than it would with a real 32 k crystal. Light sleep still works; it
+# just saves somewhat less, and an occasional missed beacon is expected.
+
 # Custom dual-OTA partition table for 4MB (see partitions.csv). The table stays at
 # the default 0x8000, so CONFIG_PARTITION_TABLE_OFFSET is deliberately not set.
 CONFIG_PARTITION_TABLE_CUSTOM=y

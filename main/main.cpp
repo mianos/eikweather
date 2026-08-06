@@ -34,6 +34,7 @@
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
 #include "esp_ota_ops.h"
+#include "esp_pm.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -75,6 +76,55 @@ bool haveIp() {
   if (!sta) return false;
   esp_netif_ip_info_t ip{};
   return esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr != 0;
+}
+
+// Dynamic frequency scaling plus automatic light sleep, or no power management at
+// all. Call only after WiFiManager has brought the driver up — esp_wifi_set_ps
+// needs an initialised Wi-Fi stack.
+//
+// This board is mains powered, so the goal is LESS HEAT behind the panel rather
+// than battery life. Measured on the live device: 91 refreshes of 24.6 s in 16.1 h
+// of uptime, so the panel is busy 3.9% of the time and the other 96% went into
+// idling at ~30 mA purely to hold a Wi-Fi association and an MQTT socket. DFS drops
+// the CPU to the 40 MHz crystal whenever no task holds a lock, and tickless idle
+// light-sleeps between beacons.
+//
+// Deliberately light sleep and NOT deep sleep. Deep sleep would save maybe another
+// 1-2 mA — the 3.9% refresh duty is a floor no sleep strategy gets under — and it
+// would cost the MQTT subscription, the web API and OTA for 96% of the time, plus
+// moving the trend anchors into RTC memory or the rise/fall marks would never
+// appear again (every wake is a cold boot, and updateTrend needs trend_win_min of
+// history). Not a trade worth making for 0.15 W. README has the full comparison.
+void applyPowerManagement(int lightSleep) {
+  // Already the IDF default, but set explicitly because it is a PREREQUISITE, not
+  // an optimisation: under WIFI_PS_NONE the Wi-Fi driver holds an
+  // ESP_PM_NO_LIGHT_SLEEP lock for as long as it is associated, and
+  // esp_pm_configure(light_sleep_enable = true) then silently does nothing at all.
+  // (ws-voice does call set_ps(NONE) — it needs the latency for real-time audio.
+  // Nothing here transacts more often than once every few minutes.)
+  esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+  if (err != ESP_OK) ESP_LOGW(TAG, "esp_wifi_set_ps: %s", esp_err_to_name(err));
+
+  esp_pm_config_t pm = {};
+  pm.max_freq_mhz = 160;
+  // 40 MHz is the crystal frequency. Going below it would divide REF_TICK too far
+  // (esp_pm_configure rejects it), and REF_TICK is what the console UART is
+  // re-clocked onto when PM is enabled, so the log stays readable across frequency
+  // changes. lightSleep = 0 pins max == min, which disables DFS as well and
+  // restores exactly the pre-power-management behaviour.
+  pm.min_freq_mhz = lightSleep ? 40 : 160;
+  pm.light_sleep_enable = lightSleep != 0;
+  err = esp_pm_configure(&pm);
+  if (err != ESP_OK) {
+    // ESP_ERR_NOT_SUPPORTED here means the sdkconfig lost CONFIG_PM_ENABLE or
+    // CONFIG_FREERTOS_USE_TICKLESS_IDLE. Warn rather than abort: a hot display is
+    // still a working display.
+    ESP_LOGW(TAG, "esp_pm_configure(%d/%d, sleep=%d): %s", pm.max_freq_mhz,
+             pm.min_freq_mhz, pm.light_sleep_enable, esp_err_to_name(err));
+    return;
+  }
+  ESP_LOGI(TAG, "power: cpu %d-%d MHz, light sleep %s", pm.min_freq_mhz,
+           pm.max_freq_mhz, pm.light_sleep_enable ? "on" : "off");
 }
 
 void validateLatLon(const Settings& s) {
@@ -447,6 +497,9 @@ extern "C" void app_main(void) {
   std::string host = settings.sensorName;
   wifi.configSetHostName(host);
 
+  // After WiFiManager (needs the Wi-Fi driver up), before anything starts polling.
+  applyPowerManagement(settings.lightSleep);
+
   // TZ + SNTP after WiFiManager, since esp_netif_sntp_init needs the STA netif.
   // Nothing displays the time, but mbedTLS needs a plausible clock to validate
   // the Open-Meteo certificate.
@@ -482,6 +535,15 @@ extern "C" void app_main(void) {
       if (s_displayTask) xTaskNotifyGive(s_displayTask);
     });
   }
+  // Light sleep takes effect immediately, with no reboot. That is the point of
+  // having it as a setting: it is the one change here that could plausibly make the
+  // network flaky (sleep timing comes off the internal RC oscillator, since this
+  // board has no 32 kHz crystal), so turning it back off must not require reaching
+  // a device that has become hard to reach.
+  settings.onChange("light_sleep", [] {
+    applyPowerManagement(settings.lightSleep);
+  });
+
   // MQTT subscriptions are established once in Sensors::attach() below, and
   // MqttClient has no way to REMOVE a handler binding, so re-pointing a topic
   // means a restart. Say so rather than leaving it silently ineffective.

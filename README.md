@@ -177,6 +177,103 @@ back — so `Button(GPIO_NUM_34)` would compile, run, and read noise. Measured i
 level is 0, i.e. there is no external pull-up either. Adopting the button needs a
 10 kΩ to 3V3 first.
 
+## Power and heat — light sleep, not deep sleep
+
+The board is mains powered, so this is about **running cooler behind the panel**,
+not battery life. The number that decides the whole design came off the live
+device: **91 refreshes of 24.6 s in 16.1 h of uptime**, i.e. one every ~10.6 min
+and a **3.9% duty cycle**. For the other 96% the chip was doing nothing but
+holding a Wi-Fi association and an MQTT socket, at roughly 30 mA.
+
+So the win is entirely in the idle term, and **automatic light sleep collects
+almost all of it**:
+
+| | idle draw | avg current | per day |
+|---|---|---|---|
+| no power management | ~30 mA | ~30 mA | ~730 mAh |
+| **DFS + automatic light sleep** (current) | ~2–4 mA | **~3–4.5 mA** | ~80–110 mAh |
+| deep sleep, waking every 10 min | ~10 µA + board floor | ~1.5–2.4 mA | ~40–60 mAh |
+
+**These are datasheet-derived estimates, not measurements** — there is no meter on
+this board and the ESP32 (unlike the S2/S3) has no usable internal temperature
+sensor, so there is no software proxy either. Only the duty cycle and the refresh
+duration are measured.
+
+### Why not deep sleep
+
+It was considered properly, and the blocker is not feasibility — all three MQTT
+topics are published `retain: true`, so a freshly-woken device gets every reading
+within about a second of connecting, and the panel driver is already deep-sleep
+clean (`hibernate()` after every refresh, `hibernating_` starts true, framebuffer
+rebuilt from scratch, no pins needing `gpio_hold`). It is that it **buys almost
+nothing here and costs a lot**:
+
+- The 3.9% refresh duty is a floor no sleep strategy gets under, so deep sleep is
+  only ~1–2 mA better than light sleep — about **0.15 W on a mains-powered
+  device**.
+- Every wake is a cold boot, so the **rise/fall marks would never appear again**:
+  `Reading::updateTrend` needs `trend_win_min` of history and reports `Unknown`
+  until it has it. The anchors (`refTenths`/`refAt` × 3), the drawn `ScreenModel`
+  and the last-good `Weather` would all have to move to `RTC_DATA_ATTR` — cheap in
+  bytes, but this is the kind of thing that fails silently.
+- **The web API and OTA would be gone 96% of the time.** No `/healthz`, no
+  `/config`, no firmware push. That needs a retained MQTT command topic
+  (`{"stay_awake":600}`, picked up on the next wake) built *first*, or the board is
+  unreachable by design.
+- It stops being event-driven: repaint phase gets set by the wake timer instead of
+  by when a reading arrives.
+
+### What is actually enabled
+
+`CONFIG_PM_ENABLE` + `CONFIG_FREERTOS_USE_TICKLESS_IDLE`, with
+`esp_pm_configure(160 MHz max / 40 MHz min, light_sleep_enable)` called from
+`app_main` and gated on the `light_sleep` setting. Confirm it took effect on
+`/healthz`, which reads the values back **from the driver** rather than from
+settings: `cpu_max_mhz`, `cpu_min_mhz`, `light_sleep`, `wifi_ps`.
+
+Four details that are load-bearing:
+
+- **`wifi_ps` must not be 0.** Under `WIFI_PS_NONE` the Wi-Fi driver holds an
+  `ESP_PM_NO_LIGHT_SLEEP` lock for as long as it is associated and
+  `light_sleep_enable` silently achieves nothing. `main.cpp` sets
+  `WIFI_PS_MIN_MODEM` explicitly for that reason, even though it is already the
+  IDF default. (ws-voice sets `NONE` — it needs the latency for real-time audio.)
+- **The panel BUSY poll is 50 ms, not 20.** FreeRTOS light-sleeps only when no task
+  needs to run for `CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP` ticks, which is 3 at
+  the 100 Hz tick. A 20 ms delay is 2 ticks — just under — so the chip stayed fully
+  awake for the whole ~25 s refresh, the single longest stretch of the cycle. 50 ms
+  is 5 ticks. Cost: `refresh_ms` went 24,600 → 24,636.
+- **SPI is safe from mid-transfer sleep.** `spi_device_acquire_bus()` holds
+  `ESP_PM_APB_FREQ_MAX`, and any held lock blocks light sleep. The driver acquires
+  around both plane writes and releases *before* the 25 s BUSY wait, which is
+  exactly the right shape — the transfers are protected, the long wait sleeps.
+- **The serial log stays readable.** `esp_pm_impl_init()` re-clocks the console UART
+  onto `REF_TICK`, which DFS does not affect.
+
+`CONFIG_PM_SLP_DISABLE_GPIO` is deliberately **off**. It saves 200–300 µA by
+disabling every GPIO during sleep, which would drop panel RST low mid-refresh and
+reset the controller in the middle of a 24 s burn.
+
+### If it misbehaves
+
+Light sleep is the one change here that could plausibly degrade the network: this
+board has no 32.768 kHz crystal (`CONFIG_RTC_CLK_SRC_INT_RC`), so sleep timing
+comes from the internal 150 kHz RC oscillator. IDF calibrates it against the
+crystal, but the residual error means Wi-Fi wakes with more margin before each
+beacon than it would otherwise, and an occasional missed beacon is expected.
+
+```
+curl -X POST -d '{"light_sleep":0}' http://<host>/config
+```
+
+takes effect **immediately, with no reboot** — that is why it is a setting and not
+a compile-time choice. It pins 160 MHz and disables DFS as well, restoring exactly
+the pre-power-management behaviour.
+
+Measured after enabling: HTTP `/healthz` latency 0.12–0.14 s, MQTT readings still
+arriving, `busy_timeouts` 0, `heap_min` down ~860 bytes. Expect OTA uploads to be
+somewhat slower, since the AP now buffers to the DTIM interval.
+
 ## Build and flash
 
 Requires an SSH key with read access to `git@github.com:mianos/mianesp.git`
@@ -291,6 +388,11 @@ plus:
   `ESP_ERR_HTTP_CONNECT` on the first post-boot fetch was identified.
 - `inside_topic` / `outside_topic` and `mqtt_messages`, enough to diagnose a wrong
   topic or field name without a serial cable.
+- `cpu_max_mhz` / `cpu_min_mhz` / `light_sleep` / `wifi_ps`, read back from the
+  **driver** rather than from settings, so a `light_sleep: 1` setting against a
+  build that lost `CONFIG_PM_ENABLE` is visible rather than silent.
+  `cpu_min_mhz == cpu_max_mhz` means DFS is off; `wifi_ps: 0` means the Wi-Fi driver
+  is holding a no-light-sleep lock and nothing ever sleeps.
 
 ### Settings worth knowing
 
@@ -311,6 +413,7 @@ plus:
 | `rotation`, `invert_red` | `3`, `0` | |
 | `border`, `src_mode`, `update_mode` | `0x05`, `0x80`, `0xF7` | SSD1680 init bytes |
 | `enable_web` | `1` | `0` reclaims ~28 KB of heap, losing the config API |
+| `light_sleep` | `1` | DFS + automatic light sleep; `0` pins 160 MHz. Applies immediately — see [Power and heat](#power-and-heat--light-sleep-not-deep-sleep) |
 
 `SettingsBase` supports only `std::string` and `int` — no float, no bool. Lat/lon
 are strings because their only consumer is a URL, so text goes in with no
@@ -530,9 +633,13 @@ owns would double-free.
 
 ## Not done
 
-- **Deep sleep.** Structured for it: `refresh()` assumes nothing about staying
-  powered, `hibernate()` already runs after every paint, and the framebuffer is
-  redrawn from scratch. `Weather` would need `RTC_DATA_ATTR` to survive a wake.
+- **Deep sleep** — evaluated and deliberately declined; **automatic light sleep is
+  enabled instead**. Still structured for it if that ever changes (`refresh()`
+  assumes nothing about staying powered, `hibernate()` runs after every paint, the
+  framebuffer is redrawn from scratch, all three MQTT topics are retained), but it
+  would only save ~1–2 mA over light sleep while costing OTA, the web API and the
+  rise/fall marks. Full comparison and the numbers behind it:
+  [Power and heat](#power-and-heat--light-sleep-not-deep-sleep).
 - **Battery display** from GPIO35, and the **button** (needs an external pull-up).
 - A **24-hour soak**: watch `heap_min` for a monotonic downward trend (the TLS/HTTP
   path is the likeliest place for a leak), any `busy_timeouts`, and drift of the

@@ -276,7 +276,14 @@ esp_err_t Panel::waitBusy_(const char* what, int timeoutMs) {
     // 30-second busy-spin would starve IDLE1 and panic the task watchdog
     // (CONFIG_ESP_TASK_WDT_INIT defaults on and watches both idle tasks).
     // Do not "optimise" this into a tight loop.
-    vTaskDelay(pdMS_TO_TICKS(20));
+    //
+    // 50 ms, not 20, and the exact number matters. FreeRTOS enters automatic light
+    // sleep only when no task needs to run for CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP
+    // ticks, which is 3 at our 100 Hz tick. A 20 ms delay is 2 ticks, so it fell
+    // just under the threshold and the chip stayed fully awake for the whole ~25 s
+    // refresh — the single longest stretch of the cycle. 50 ms is 5 ticks, which
+    // sleeps, and 50 ms of granularity against a 24,600 ms burn costs nothing.
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
   return ESP_OK;
 }

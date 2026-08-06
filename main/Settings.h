@@ -129,6 +129,22 @@ struct Settings : SettingsBase {
   // at the cost of losing the only way to change lat/lon without a reflash.
   int enableWeb = 1;
 
+  // --- power management -------------------------------------------------
+  // 1 => dynamic frequency scaling (160 MHz busy / 40 MHz idle) plus automatic
+  // light sleep. 0 => no power management at all, pinned at 160 MHz.
+  //
+  // This device is mains powered, so the goal is LESS HEAT behind the panel, not
+  // battery life. The panel refreshes for ~25 s once every ~10 min — a 3.9% duty
+  // cycle — so almost all of the energy went into idling with the radio
+  // associated. See sdkconfig.defaults and the README for the measurements.
+  //
+  // Runtime rather than compile-time because light sleep is the one change here
+  // that can plausibly degrade the network: sleep timing comes from the internal
+  // RC oscillator (no 32 k crystal on this board), so if MQTT latency or the web
+  // API get unreliable, POST /config {"light_sleep":0} is the escape hatch and it
+  // takes effect immediately — no reflash, and no reboot needed either.
+  int lightSleep = 1;
+
   explicit Settings(NvsStorageManager& nvs) : SettingsBase(nvs) {
     field("sensor_name", sensorName);
     field("tz", tz);
@@ -161,6 +177,7 @@ struct Settings : SettingsBase {
     field("src_mode", srcMode);
     field("update_mode", updateMode);
     field("enable_web", enableWeb);
+    field("light_sleep", lightSleep);
     load();  // MUST be last, after every field() registration
   }
 

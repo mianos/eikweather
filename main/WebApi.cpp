@@ -9,8 +9,10 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_pm.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 
 namespace {
 
@@ -169,6 +171,25 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("panel_w", settings_.panelW);
   json.AddItem("panel_h", settings_.panelH);
   json.AddItem("rotation", settings_.rotation);
+
+  // Power management, read back from the DRIVER rather than from settings_: the
+  // setting is what was asked for, this is what esp_pm actually applied. They
+  // differ if the sdkconfig lost CONFIG_PM_ENABLE, which is otherwise invisible.
+  // cpu_min_mhz == cpu_max_mhz means DFS is off.
+  //
+  // wifi_ps is here because it GATES light sleep: WIFI_PS_NONE (0) means the Wi-Fi
+  // driver is holding a no-light-sleep lock and the chip never sleeps regardless of
+  // what light_sleep says.
+  esp_pm_config_t pm = {};
+  if (esp_pm_get_configuration(&pm) == ESP_OK) {
+    json.AddItem("cpu_max_mhz", pm.max_freq_mhz);
+    json.AddItem("cpu_min_mhz", pm.min_freq_mhz);
+    json.AddItem("light_sleep", pm.light_sleep_enable);
+  }
+  wifi_ps_type_t ps = WIFI_PS_NONE;
+  if (esp_wifi_get_ps(&ps) == ESP_OK) {
+    json.AddItem("wifi_ps", static_cast<int>(ps));
+  }
 
   char localNow[32] = "";
   if (now > 1700000000) {
