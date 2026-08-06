@@ -271,8 +271,9 @@ a compile-time choice. It pins 160 MHz and disables DFS as well, restoring exact
 the pre-power-management behaviour.
 
 Measured after enabling: HTTP `/healthz` latency 0.12–0.14 s, MQTT readings still
-arriving, `busy_timeouts` 0, `heap_min` down ~860 bytes. Expect OTA uploads to be
-somewhat slower, since the AP now buffers to the DTIM interval.
+arriving, `busy_timeouts` 0, `heap_min` down ~860 bytes, and a **1.4 MB OTA upload
+took 18.2 s against 17.3 s before** — so the DTIM buffering costs about 5%, not the
+noticeable slowdown that was expected.
 
 ## Build and flash
 
