@@ -416,7 +416,7 @@ void displayTask(void* arg) {
   // MQTT is started HERE, not at the end of app_main, because app_main finishes
   // roughly a second BEFORE DHCP hands over the lease. Starting the client then
   // guaranteed a failed connect —
-  //     esp-tls: couldn't get hostname for :mqtt2.mianos.com: getaddrinfo() 202
+  //     esp-tls: couldn't get hostname for :mqtt.local: getaddrinfo() 202
   // — and the first reading then had to wait out esp-mqtt's 10 s reconnect
   // backoff. Nothing was broken, but the first useful paint was 10 s late for no
   // reason. The client is created in app_main and its subscriptions are already

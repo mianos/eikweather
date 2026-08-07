@@ -118,8 +118,11 @@ Consequences worth knowing:
   `inside_trend_age_s` below `trend_win_min * 60` means "not enough history yet",
   not "sensor is dead".
 - **A gap longer than 3x the window resets to unknown** instead of comparing
-  across it. A publisher that went away for hours, or SNTP stepping the clock at
-  boot, would otherwise manufacture a trend out of a meaningless difference. This
+  across it: a publisher that went away for hours would otherwise manufacture a
+  trend out of a meaningless difference. This used to fire from SNTP stepping the
+  clock at boot as well, silently costing an extra blank window on any boot where a
+  retained message beat the time sync — no longer possible, since all ages are now
+  measured on a monotonic clock (see `main/Monotonic.h`). This
   also means a sensor publishing less often than ~2x the window can never resolve
   a trend — seen for real on `home/temperature/outside` (~6 min between messages)
   while testing at `trend_win_min=1`.
@@ -364,9 +367,17 @@ noticeable slowdown that was expected.
 
 ## Build and flash
 
-Requires an SSH key with read access to `git@github.com:mianos/mianesp.git`
-(`ssh -T git@github.com` should greet you). The component manager clones the
-dependencies on the first build.
+The shared components come from [mianos/mianesp](https://github.com/mianos/mianesp),
+which is public — but **you still need an SSH key on your GitHub account**
+(`ssh -T git@github.com` should greet you). Any key works; no special access is
+needed. The reason is not this repo: `main/idf_component.yml` asks for its six
+components over HTTPS, but three of them (`mqttwrapper`, `settingsbase`,
+`webserver`) declare their own cross-dependencies as `git@github.com:...` *inside
+mianesp*, so resolution still reaches for SSH. Fixing that properly means changing
+those three manifests upstream.
+
+If the first build dies in dependency resolution rather than in the compiler, that
+is what happened — it is not your toolchain.
 
 ```sh
 ./build.sh                                  # sets target esp32 on first run
@@ -405,8 +416,8 @@ subscribes rather than waiting for the next sensor report:
 
 ### The hot water tank topic did not exist
 
-The heat pump is a Tuya device read by a `tuya-smart-device` node in Node-RED flow
-`bd780c1b6099c93d` (`nr2.mianos.com:1880`). The tank temperature is Tuya datapoint
+The heat pump is a Tuya device read by a `tuya-smart-device` node in a Node-RED flow
+on the local automation host. The tank temperature is Tuya datapoint
 **3** (falling back to **102**), merged into flow context by the `merge dps` node —
 and it only ever went to a `ui_chart`. **Nothing published it to MQTT**, so there
 was no topic for this display to subscribe to.
@@ -492,7 +503,7 @@ plus:
 | `tz` | `AEST-10AEDT,M10.1.0,M4.1.0/3` | POSIX TZ |
 | `inside_topic` / `inside_field` / `inside_label` | `""` / `temperature` / `IN` | empty topic => shows `--` |
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose — see below |
-| `mqtt_server` / `mqtt_port` | `mqtt2.mianos.com` / `1883` | |
+| `mqtt_server` / `mqtt_port` | `mqtt.local` / `1883` | |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
 | `trend_win_min` / `trend_tenths` | `10` / `1` | rise/fall window, and deadband in tenths of a degree |
 | `alert_age_min` | `60` | red `!` once a working source goes quiet this long; `0` disables — see [above](#the-stale-data-alert) |

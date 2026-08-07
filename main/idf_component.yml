@@ -1,8 +1,9 @@
 dependencies:
   # Shared infrastructure — mianesp repo (same pattern as ws-voice / atomecho /
-  # ldr3 / doorbell3). Requires an SSH key with read access to
-  # git@github.com:mianos/mianesp.git on the build host: verify with
-  #   ssh -T git@github.com
+  # ldr3 / doorbell3). Fetched over HTTPS from the PUBLIC
+  # https://github.com/mianos/mianesp — deliberately not the git@github.com: form,
+  # which needs an SSH key on the build host and so made a clean clone of this repo
+  # fail at dependency resolution, before compiling a single line.
   # Settings stays app-local (main/Settings.h).
   #
   # `version: main` is unpinned, so dependencies.lock IS committed (see
@@ -14,27 +15,27 @@ dependencies:
   # otawrapper (the small /firmware handler is enough), audioplayer, button
   # (its ctor calls gpio_pullup_en, which cannot work on input-only GPIO34).
   jsonwrapper:
-    git: git@github.com:mianos/mianesp.git
+    git: https://github.com/mianos/mianesp.git
     path: components/jsonwrapper
     version: main
   nvsstoragemanager:
-    git: git@github.com:mianos/mianesp.git
+    git: https://github.com/mianos/mianesp.git
     path: components/nvsstoragemanager
     version: main
   wifimanager:
-    git: git@github.com:mianos/mianesp.git
+    git: https://github.com/mianos/mianesp.git
     path: components/wifimanager
     version: main
   webserver:
-    git: git@github.com:mianos/mianesp.git
+    git: https://github.com/mianos/mianesp.git
     path: components/webserver
     version: main
   settingsbase:
-    git: git@github.com:mianos/mianesp.git
+    git: https://github.com/mianos/mianesp.git
     path: components/settingsbase
     version: main
   mqttwrapper:
-    git: git@github.com:mianos/mianesp.git
+    git: https://github.com/mianos/mianesp.git
     path: components/mqttwrapper
     version: main
   espressif/mqtt: "*"

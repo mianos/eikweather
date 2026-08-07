@@ -28,7 +28,16 @@ struct Settings : SettingsBase {
   std::string tempUnit = "celsius";    // "celsius" | "fahrenheit", passed through
 
   // --- MQTT (local readings) --------------------------------------------
-  std::string mqttServer = "mqtt2.mianos.com";
+  // Placeholder on purpose — point it at your own broker with
+  //   curl -X POST -d '{"mqtt_server":"broker.example.lan"}' http://<host>/config
+  // followed by POST /reboot, since MQTT subscriptions are established once at
+  // startup (see the onChange warning in main.cpp).
+  //
+  // Note this default is only ever consulted on a board that has never been
+  // configured: SettingsBase persists the whole schema as one JSON blob in NVS, so
+  // once a device has stored a broker, that stored value wins over any compiled
+  // default forever. Changing this line does not move a running device.
+  std::string mqttServer = "mqtt.local";
   int mqttPort = 1883;
 
   // Topics and field names, so the display can be re-pointed with POST /config

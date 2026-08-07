@@ -73,7 +73,7 @@ dependencies:
       path: components/nvsstoragemanager
       version: main
     source:
-      git: git@github.com:mianos/mianesp.git
+      git: https://github.com/mianos/mianesp.git
       path: components/mqttwrapper
       type: git
     version: 3f2196051cee784e89c48555966ccc8781b0dae0
@@ -97,7 +97,7 @@ dependencies:
       path: components/nvsstoragemanager
       version: main
     source:
-      git: git@github.com:mianos/mianesp.git
+      git: https://github.com/mianos/mianesp.git
       path: components/settingsbase
       type: git
     version: 3f2196051cee784e89c48555966ccc8781b0dae0
@@ -121,7 +121,7 @@ dependencies:
       path: components/button
       version: main
     source:
-      git: git@github.com:mianos/mianesp.git
+      git: https://github.com/mianos/mianesp.git
       path: components/webserver
       type: git
     version: 3f2196051cee784e89c48555966ccc8781b0dae0
@@ -143,6 +143,6 @@ direct_dependencies:
 - settingsbase
 - webserver
 - wifimanager
-manifest_hash: d45b305e7e2c2faa0cb2bd1989c958e952a47a7ceb95bdeda172f35854d009e2
+manifest_hash: 3700391c370e486b80126cdcf36932e0ce0cb04d9c290a58868112673d6a3b8a
 target: esp32
 version: 3.0.0
