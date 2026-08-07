@@ -63,10 +63,12 @@ constexpr int kLabelMaxW = 70;
 //
 // Bottom-aligned to the TEMPERATURE baseline, not the label's: the arrow modifies
 // the number, so it should sit on the same line as the number.
-// A bare 23x12 triangle. Odd width, and the height is not a free choice — it is
-// w/2+1, which is what holds the edges at 45 degrees (see drawTrendArrow).
+// A bare 23x12 triangle. Odd width, and the height is NOT a free choice — it is
+// w/2+1, which is what holds the edges at 45 degrees. drawTrendArrow derives it
+// internally from the width for exactly that reason, so there is no height constant
+// here to get out of step with it. tools/preview keeps its own copy to assert the
+// vertical budget.
 constexpr int kArrowW = 23;
-constexpr int kArrowH = kArrowW / 2 + 1;
 constexpr int kArrowGap = 10;  // clearance on each side
 // The triangle is CENTRED on the digits' cap height, not stood on their baseline:
 // Font_Big's caps run 31px above the baseline, so a 12px mark sitting on the

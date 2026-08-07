@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <vector>
 
 #include "Canvas.h"
@@ -160,8 +161,100 @@ void checkTenths() {
 
 }  // namespace
 
+// ScreenModel::operator== decides whether to spend ~25 s of flashing on a repaint,
+// and it is defaulted, so nothing in the compiler checks that it does the right
+// thing. Two properties are asserted here.
+//
+// The second one is the reason this exists: the old hand-written strcmp chain could
+// silently omit a field, and the only symptom would have been that field never
+// updating on the glass. Mutating each field in turn proves every one participates —
+// across all three member kinds (char arrays, bools, and the Trend enum).
+void checkModelEquality() {
+  printf("\nScreenModel equality\n");
+  // Written the way buildModel does it: a FRESH, fully-zeroed model each time, so
+  // bytes past each NUL are deterministic and element-wise array comparison is safe.
+  auto make = [](const char* forecast = "Partly cloudy 6/17") {
+    ScreenModel m;
+    snprintf(m.forecast, sizeof m.forecast, "%s", forecast);
+    snprintf(m.insideLabel, sizeof m.insideLabel, "IN");
+    snprintf(m.insideTemp, sizeof m.insideTemp, "21.4");
+    m.insideValid = true;
+    m.insideTrend = Trend::Rising;
+    snprintf(m.outsideLabel, sizeof m.outsideLabel, "OUT");
+    snprintf(m.outsideTemp, sizeof m.outsideTemp, "7.8");
+    m.outsideValid = true;
+    m.outsideTrend = Trend::Falling;
+    m.forecastValid = true;
+    snprintf(m.water, sizeof m.water, "48");
+    snprintf(m.date, sizeof m.date, "Wed 5 Aug");
+    snprintf(m.rain, sizeof m.rain, "rain 10%%");
+    return m;
+  };
+
+  const bool identical = make() == make();
+  if (!identical) ++fails;
+  printf("  %-22s %s\n", "identical content",
+         identical ? "equal, ok" : "*** UNEQUAL — SPURIOUS REPAINTS ***");
+
+  // THE constraint behind the defaulted operator==, pinned so it cannot rot.
+  //
+  // Arrays compare element-wise, including bytes past the NUL, and snprintf does not
+  // zero the tail. So a buffer that once held a LONGER string and was overwritten by
+  // a shorter one differs, byte for byte, from a fresh buffer holding only the
+  // shorter string — even though both render identically. That would cost a spurious
+  // ~25 s repaint.
+  //
+  // It is safe today only because buildModel() fills a brand-new ScreenModel every
+  // pass. This asserts the hazard is REAL, so that "just reuse one instance" is never
+  // mistaken for a harmless optimisation. If it ever starts reporting equal, someone
+  // has begun zeroing tails and the freshness rule could be relaxed.
+  {
+    ScreenModel reused = make();                    // held "Partly cloudy 6/17"
+    snprintf(reused.forecast, sizeof reused.forecast, "Clear 6/17");
+    const ScreenModel fresh = make("Clear 6/17");    // only ever held the short one
+    const bool differs = !(reused == fresh);
+    if (!differs) ++fails;
+    printf("  %-22s %s\n", "stale tail bytes",
+           differs ? "detected, ok — buildModel must use a fresh model per pass"
+                   : "*** NOT DETECTED — the freshness comment is now wrong ***");
+  }
+
+  struct Mut { const char* name; void (*apply)(ScreenModel&); };
+  const Mut muts[] = {
+      {"insideLabel", [](ScreenModel& m) { snprintf(m.insideLabel, sizeof m.insideLabel, "LOUNGE"); }},
+      {"insideTemp",  [](ScreenModel& m) { snprintf(m.insideTemp, sizeof m.insideTemp, "21.5"); }},
+      {"insideValid", [](ScreenModel& m) { m.insideValid = false; }},
+      {"insideTrend", [](ScreenModel& m) { m.insideTrend = Trend::Steady; }},
+      {"outsideLabel",[](ScreenModel& m) { snprintf(m.outsideLabel, sizeof m.outsideLabel, "EXT"); }},
+      {"outsideTemp", [](ScreenModel& m) { snprintf(m.outsideTemp, sizeof m.outsideTemp, "7.9"); }},
+      {"outsideValid",[](ScreenModel& m) { m.outsideValid = false; }},
+      {"outsideTrend",[](ScreenModel& m) { m.outsideTrend = Trend::Steady; }},
+      {"forecast",    [](ScreenModel& m) { snprintf(m.forecast, sizeof m.forecast, "Clear 6/17"); }},
+      {"forecastValid",[](ScreenModel& m) { m.forecastValid = false; }},
+      {"water",       [](ScreenModel& m) { snprintf(m.water, sizeof m.water, "49"); }},
+      {"date",        [](ScreenModel& m) { snprintf(m.date, sizeof m.date, "Thu 6 Aug"); }},
+      {"rain",        [](ScreenModel& m) { snprintf(m.rain, sizeof m.rain, "rain 20%%"); }},
+      {"alert",       [](ScreenModel& m) { m.alert = true; }},
+  };
+  int missed = 0;
+  for (const Mut& mut : muts) {
+    ScreenModel m = make();
+    mut.apply(m);
+    if (m == make()) {
+      ++missed;
+      printf("  %-22s *** NOT COMPARED — changes to it will never repaint ***\n",
+             mut.name);
+    }
+  }
+  if (missed) ++fails;
+  printf("  %-22s %d of %d fields affect equality  %s\n", "field coverage",
+         static_cast<int>(std::size(muts)) - missed, static_cast<int>(std::size(muts)),
+         missed ? "*** FAILED ***" : "ok");
+}
+
 int main() {
   checkTenths();
+  checkModelEquality();
 
   printf("font metrics\n");
   printf("  Font_Big yAdvance=%d  Font_Label yAdvance=%d  Font_Cond yAdvance=%d\n",

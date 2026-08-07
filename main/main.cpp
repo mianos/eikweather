@@ -14,7 +14,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
 
 #include "App.h"
@@ -330,25 +329,19 @@ bool complete(const ScreenModel& m) {
 // repaint is worth 20+ seconds of flashing — far more robust than a temperature
 // delta threshold, because it is exactly the question "would the screen differ?".
 bool sameAsDrawn(const ScreenModel& a, const ScreenModel& b) {
-  // The trends are compared too, so a direction change earns a repaint on its
-  // own. Bounded by construction: Reading::updateTrend re-evaluates at most once
-  // per trend_win_min, so this can add at most two repaints per window.
-  return strcmp(a.insideLabel, b.insideLabel) == 0 &&
-         strcmp(a.insideTemp, b.insideTemp) == 0 &&
-         a.insideValid == b.insideValid && a.insideTrend == b.insideTrend &&
-         strcmp(a.outsideLabel, b.outsideLabel) == 0 &&
-         strcmp(a.outsideTemp, b.outsideTemp) == 0 &&
-         a.outsideValid == b.outsideValid && a.outsideTrend == b.outsideTrend &&
-         strcmp(a.forecast, b.forecast) == 0 && strcmp(a.date, b.date) == 0 &&
-         strcmp(a.rain, b.rain) == 0 && strcmp(a.water, b.water) == 0 &&
-         // Without this the alert would never earn a repaint and so would never
-         // appear except by riding along on some other change.
-         //
-         // It cannot self-trigger, because it is derived from DATA age rather than
-         // paint age: a mark keyed off "time since last repaint" would clear itself
-         // the moment it was drawn and then flap, at ~25 s of flashing per flip.
-         // Worst case here is two extra repaints per outage, one on and one off.
-         a.alert == b.alert;
+  // ScreenModel's defaulted operator== does the work — see the note there for why a
+  // hand-written field-by-field version was a footgun and why the defaulted one is
+  // safe. Every field is included automatically, which matters for two of them:
+  //
+  //  - The TRENDS, so a direction change earns a repaint on its own. Bounded by
+  //    construction: Reading::updateTrend re-evaluates at most once per
+  //    trend_win_min, so it can add at most two repaints per window.
+  //  - The stale-data ALERT, which would otherwise never appear except by riding
+  //    along on some other change. It cannot self-trigger, because it derives from
+  //    DATA age rather than paint age: a mark keyed off "time since last repaint"
+  //    would clear itself the moment it was drawn and then flap, at ~25 s of
+  //    flashing per flip. Worst case is two repaints per outage, on and off.
+  return a == b;
 }
 
 void paint(App& app, const ScreenModel& m) {

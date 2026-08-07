@@ -73,6 +73,30 @@ struct ScreenModel {
   // Non-null => draw the boot / provisioning screen instead of the readings.
   const char* banner = nullptr;
   const char* banner2 = nullptr;
+
+  // Compared to decide whether a repaint is worth ~25 s of flashing. DEFAULTED
+  // rather than hand-written, and that is the whole point: the previous version was
+  // a 12-field strcmp chain, so adding a field to this struct silently left it out
+  // of the comparison. No compile error, no warning — just a field that never
+  // updates on the glass. Adding `alert` nearly shipped exactly that bug, and the
+  // symptom would have been "the alert feature doesn't work" with nothing pointing
+  // at the comparison. Now a new field joins the comparison automatically.
+  //
+  // Two things make this safe, both of which a naive defaulted == would get wrong:
+  //
+  // 1. Defaulted == compares char arrays ELEMENT-WISE, including bytes past the
+  //    NUL, and snprintf does not zero the tail. That would be a bug — "Overcast"
+  //    overwritten by "Clear" leaves stale bytes — except that every member here has
+  //    a `= {}` initialiser and buildModel() always fills a FRESH `ScreenModel`
+  //    declared inside the display loop. So each pass starts fully zeroed, fields
+  //    that go unwritten stay zeroed, and identical content is identical bytes.
+  //    Keep it that way: reusing one instance across passes would break this.
+  //
+  // 2. banner/banner2 are pointers, so they compare by ADDRESS, not by string. That
+  //    is a widening — the old comparison ignored them entirely — and it is harmless
+  //    because the banner path is the boot/provisioning screen, which never competes
+  //    with the readings: in the normal loop both are nullptr in both operands.
+  bool operator==(const ScreenModel&) const = default;
 };
 
 void renderScreen(epd::Canvas& c, const ScreenModel& m);
