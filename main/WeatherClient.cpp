@@ -132,7 +132,7 @@ bool WeatherClient::fetch(Weather& out) {
 
       if (haveCode && haveDaily) {
         w.valid = true;
-        w.fetchedAt = time(nullptr);
+        w.fetchedAt = nowMonoS();
         out = w;
         ok = true;
         lastError_ = "";

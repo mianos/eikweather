@@ -5,6 +5,7 @@
 #include <cstring>
 #include <string>
 
+#include "Monotonic.h"
 #include "WifiManager.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -96,6 +97,13 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("partition", std::string(running->label));
 
   json.AddItem("uptime_s", static_cast<int>(esp_timer_get_time() / 1000000));
+  // Immediately after uptime, because they are what uptime alone cannot tell you.
+  // reset_reason explains THIS boot ("sw" for POST /reboot or an OTA, "panic" /
+  // "task_wdt" / "brownout" for the interesting cases). boot_count is persisted in
+  // NVS, so comparing it between two polls reveals a restart that happened while
+  // nobody was looking — a falling uptime is easy to misread as a slow reply.
+  json.AddItem("reset_reason", std::string(app_.resetReason));
+  json.AddItem("boot_count", app_.bootCount);
   json.AddItem("heap_free", static_cast<int>(esp_get_free_heap_size()));
   // The number that actually matters for the RAM budget: it captures the TLS
   // handshake peak. Watch it across a soak — a downward trend is a leak.
@@ -119,7 +127,12 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("lo", app_.current.lo);
   json.AddItem("hi", app_.current.hi);
   json.AddItem("rain_pct", app_.current.rainPct);
-  const time_t now = time(nullptr);
+  // Every *_age_s below is computed against the MONOTONIC clock (Monotonic.h), the
+  // same base the stamps were taken on. It used to be time(nullptr), which meant an
+  // age could read as ~56 years for a reading that had arrived seconds earlier, if it
+  // landed before SNTP synced. local_time further down is the one field here that
+  // genuinely wants the wall clock.
+  const int64_t now = nowMonoS();
   json.AddItem("weather_age_s",
                app_.current.valid ? static_cast<int>(now - app_.current.fetchedAt)
                                   : -1);
@@ -144,7 +157,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   // is a very different diagnosis from a sensor that is not publishing.
   json.AddItem("inside_trend", trendName(in.trend));
   json.AddItem("inside_trend_age_s",
-               in.refAt ? static_cast<int>(now - in.refAt) : -1);
+               in.haveRef ? static_cast<int>(now - in.refAt) : -1);
   json.AddItem("outside_topic", settings_.outsideTopic);
   json.AddItem("outside_seen", out.everSeen);
   json.AddItem("outside_value", out.tenths / 10.0);
@@ -152,7 +165,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("outside_fresh", out.fresh(settings_.sensorStaleMin));
   json.AddItem("outside_trend", trendName(out.trend));
   json.AddItem("outside_trend_age_s",
-               out.refAt ? static_cast<int>(now - out.refAt) : -1);
+               out.haveRef ? static_cast<int>(now - out.refAt) : -1);
   // The optional third reading. water_topic "" means it is not configured, which
   // is indistinguishable on screen from "configured but stale" — both are blank —
   // so surface enough here to tell them apart.
@@ -166,7 +179,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   // most useful thing about a tank temperature.
   json.AddItem("water_trend", trendName(hw.trend));
   json.AddItem("water_trend_age_s",
-               hw.refAt ? static_cast<int>(now - hw.refAt) : -1);
+               hw.haveRef ? static_cast<int>(now - hw.refAt) : -1);
 
   // The red "!" in the top-right corner. Reported right after the per-source ages
   // above, because those are the answer to "why is it on": whichever of
@@ -199,10 +212,14 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
     json.AddItem("wifi_ps", static_cast<int>(ps));
   }
 
+  // The one field here that genuinely wants the WALL clock, so it takes its own
+  // reading rather than reusing `now` — which is monotonic seconds since boot and
+  // would otherwise have been formatted as a date somewhere in January 1970.
+  const time_t wallNow = time(nullptr);
   char localNow[32] = "";
-  if (now > 1700000000) {
+  if (wallNow > 1700000000) {
     struct tm t;
-    localtime_r(&now, &t);
+    localtime_r(&wallNow, &t);
     strftime(localNow, sizeof localNow, "%F %T", &t);
   }
   json.AddItem("local_time", std::string(localNow));

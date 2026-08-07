@@ -1,7 +1,8 @@
 #pragma once
-#include <ctime>
+#include <cstdint>
 #include <string>
 
+#include "Monotonic.h"
 #include "MqttClient.h"
 #include "Settings.h"
 #include "Tenths.h"
@@ -19,7 +20,10 @@
 struct Reading {
   // Integer TENTHS of a degree — 17.3 degC is 173. See Tenths.h for why.
   int tenths = 0;
-  time_t at = 0;      // our own time() when the message arrived
+  // MONOTONIC seconds since boot, not time(nullptr) — see Monotonic.h. Using the
+  // wall clock here meant a reading that arrived before SNTP synced looked decades
+  // old the moment the clock stepped.
+  int64_t at = 0;
   bool everSeen = false;
 
   // A reading is only shown if it arrived recently. A sensor that has died should
@@ -27,7 +31,7 @@ struct Reading {
   // that only repaints every few minutes.
   bool fresh(int staleMin) const {
     if (!everSeen || staleMin <= 0) return everSeen;
-    return (time(nullptr) - at) <= static_cast<time_t>(staleMin) * 60;
+    return (nowMonoS() - at) <= static_cast<int64_t>(staleMin) * 60;
   }
 
   // --- rise / fall indicator ---------------------------------------------
@@ -42,25 +46,36 @@ struct Reading {
   //
   // Costs 8 bytes per reading and needs no history buffer.
   int refTenths = 0;
-  time_t refAt = 0;
+  int64_t refAt = 0;
+  // Explicit flag rather than treating refAt == 0 as "no anchor yet". On a monotonic
+  // clock 0 is a legitimate stamp — the first second after boot — and the retained
+  // MQTT messages arrive about three seconds in, close enough that relying on the
+  // sentinel was asking for trouble.
+  bool haveRef = false;
   Trend trend = Trend::Unknown;
 
 
   // Call AFTER value/at have been updated from an arriving sample.
   void updateTrend(int winMin, int deltaTenths) {
-    const time_t win = static_cast<time_t>(winMin < 1 ? 1 : winMin) * 60;
-    if (refAt == 0) {  // first sample: nothing to compare against yet
+    const int64_t win = static_cast<int64_t>(winMin < 1 ? 1 : winMin) * 60;
+    if (!haveRef) {  // first sample: nothing to compare against yet
       refTenths = tenths;
       refAt = at;
+      haveRef = true;
       return;
     }
-    const time_t age = at - refAt;
+    const int64_t age = at - refAt;
     if (age < win) return;
 
     if (age > 3 * win) {
-      // The sensor was away far longer than the window (a dead publisher, or
-      // SNTP stepping the clock forward at boot). The difference across that
-      // gap is not a trend — say so instead of inventing one.
+      // The sensor was away far longer than the window: a dead publisher that has
+      // come back. The difference across that gap is not a trend — say so instead of
+      // inventing one.
+      //
+      // This used to also fire from SNTP stepping the clock forward at boot, which
+      // silently cost a whole extra trend window on any boot where a retained
+      // message beat the time sync. Monotonic stamps make that impossible, so this
+      // branch now means only what it says.
       trend = Trend::Unknown;
     } else {
       // Plain integer subtraction — the whole point of storing tenths. Asks

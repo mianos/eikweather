@@ -31,6 +31,18 @@ struct App {
   // screen" is answerable from /healthz, next to the per-source ages that caused it.
   bool alertActive = false;
 
+  // Why this boot happened, and how many boots there have been. Both surfaced on
+  // /healthz, and the pair is the point: esp_reset_reason() alone tells you nothing
+  // if you were not watching at the time, while a counter you can poll makes a
+  // restart you MISSED visible after the fact. Without these, a manual reset and a
+  // panic looked identical from outside, and an hour was spent suspecting light sleep
+  // on no evidence at all.
+  //
+  // bootCount is read-modify-written in NVS once per boot, so it survives power
+  // cycles. See the note at the call site about the flash-wear arithmetic.
+  const char* resetReason = "?";
+  int bootCount = 0;
+
   // Set by the web server to request a one-off test pattern on the next wake.
   // 0 = none, otherwise a TestPattern value.
   volatile int pendingTest = 0;

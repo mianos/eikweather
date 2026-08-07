@@ -27,7 +27,7 @@ esp_err_t Sensors::onMessage(MqttClient*, const std::string& topic,
   // The only float -> fixed-point conversion in the data path. cJSON handed us a
   // double (it parses every JSON number as one); from here on it is all integers.
   b->dest->tenths = tenthsFromDegrees(v);
-  b->dest->at = time(nullptr);
+  b->dest->at = nowMonoS();
   b->dest->everSeen = true;
   const Settings& s = b->self->settings_;
   b->dest->updateTrend(s.trendWinMin, s.trendTenths);

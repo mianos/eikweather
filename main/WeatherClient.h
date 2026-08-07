@@ -1,6 +1,8 @@
 #pragma once
-#include <ctime>
+#include <cstdint>
 #include <string>
+
+#include "Monotonic.h"
 
 struct Settings;
 
@@ -14,7 +16,13 @@ struct Weather {
   int lo = 0;            // daily temperature_2m_min
   int hi = 0;            // daily temperature_2m_max
   int rainPct = -1;      // daily precipitation_probability_max, -1 if absent
-  time_t fetchedAt = 0;  // our own time() at the last SUCCESS, not the server's
+  // MONOTONIC seconds since boot at the last SUCCESS (see Monotonic.h), not the
+  // server's timestamp and not wall clock. This one was never actually broken by the
+  // SNTP step — fetch() is already gated on a plausible clock, because mbedTLS cannot
+  // validate the certificate without one — but it is an age like all the others, and
+  // leaving it on a different time base to the readings made overdue() in main.cpp
+  // compare two incompatible things.
+  int64_t fetchedAt = 0;
 };
 
 // Fetches https://api.open-meteo.com/v1/forecast over TLS using the IDF root

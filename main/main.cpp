@@ -15,11 +15,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <string>
 
 #include "App.h"
 #include "WebApi.h"
 #include "Epaper.h"
 #include "Gfx.h"
+#include "Monotonic.h"
 #include "MqttClient.h"
 #include "NvsStorageManager.h"
 #include "ScreenModel.h"
@@ -126,6 +128,41 @@ void applyPowerManagement(int lightSleep) {
            pm.max_freq_mhz, pm.light_sleep_enable ? "on" : "off");
 }
 
+// Why did we just boot? esp_reset_reason() is free and knows exactly, which beats
+// inferring it from uptime counters after the fact.
+const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "poweron";
+    case ESP_RST_EXT:       return "ext_pin";
+    case ESP_RST_SW:        return "sw";       // esp_restart(), e.g. POST /reboot or OTA
+    case ESP_RST_PANIC:     return "panic";    // the one that matters
+    case ESP_RST_INT_WDT:   return "int_wdt";
+    case ESP_RST_TASK_WDT:  return "task_wdt";
+    case ESP_RST_WDT:       return "other_wdt";
+    case ESP_RST_DEEPSLEEP: return "deepsleep";
+    case ESP_RST_BROWNOUT:  return "brownout";  // suspect during a panel refresh
+    case ESP_RST_SDIO:      return "sdio";
+    default:                return "unknown";
+  }
+}
+
+// Count boots in NVS so a restart that happened while nobody was polling is still
+// visible afterwards — the reset reason only describes the CURRENT boot.
+//
+// One read-modify-write per boot. Flash wear is a non-issue at this rate: NVS wear
+// levels across its partition, and even a pessimistic 100k-cycle budget spent one
+// write at a time would need tens of thousands of reboots to matter, against a device
+// that is expected to run for months at a time.
+int bumpBootCount(NvsStorageManager& nvs) {
+  std::string raw;
+  int n = 0;
+  if (nvs.retrieve("boots", raw)) n = atoi(raw.c_str());
+  if (n < 0) n = 0;  // a corrupt value must not make the counter go backwards
+  ++n;
+  nvs.store("boots", std::to_string(n));
+  return n;
+}
+
 void validateLatLon(const Settings& s) {
   char* end = nullptr;
   const double lat = strtod(s.latitude.c_str(), &end);
@@ -223,15 +260,14 @@ void formatReading(const Reading& r, int staleMin, char* out, size_t n,
 // shows "--", and an unconfigured one is a choice. So the mark means specifically
 // "this was working and has stopped" — see the note in Settings.h.
 //
-// The kPlausibleTime guard on `at` is not paranoia. MQTT is started before SNTP has
-// synced, so the first readings can be stamped near the epoch; the moment the clock
-// steps to the present, now - at is decades and EVERY source would look overdue.
-// Discarding pre-SNTP stamps costs nothing — a fresh sample restamps within
-// minutes — and it is the difference between this being trustworthy and it crying
-// wolf once per boot.
-bool overdue(bool everSeen, time_t at, time_t now, int alertAgeMin) {
-  if (!everSeen || at < kPlausibleTime || now < kPlausibleTime) return false;
-  return (now - at) > static_cast<time_t>(alertAgeMin) * 60;
+// This used to carry a pair of kPlausibleTime guards, so that stamps taken before
+// SNTP synced could not make every source look decades overdue and cry wolf once per
+// boot. Both are gone: `at` is now MONOTONIC seconds since boot (see Monotonic.h), so
+// there is no clock step left to defend against. Fixing the time base deleted the
+// workaround instead of adding another one.
+bool overdue(bool everSeen, int64_t at, int64_t nowMono, int alertAgeMin) {
+  if (!everSeen) return false;
+  return (nowMono - at) > static_cast<int64_t>(alertAgeMin) * 60;
 }
 
 void buildModel(const App& app, ScreenModel& m) {
@@ -289,10 +325,14 @@ void buildModel(const App& app, ScreenModel& m) {
   //
   // %-d is a glibc extension newlib does not support, and %e space-pads
   // ("Wed  5 Aug", double space), so assemble it explicitly.
-  const time_t now = time(nullptr);
-  if (now >= kPlausibleTime) {
+  //
+  // WALL CLOCK here, deliberately, and it is the only place in this function that
+  // wants one: a calendar date is an absolute instant, not a duration. Everything
+  // below measures ages and uses the monotonic clock instead.
+  const time_t wallNow = time(nullptr);
+  if (wallNow >= kPlausibleTime) {
     struct tm t;
-    localtime_r(&now, &t);
+    localtime_r(&wallNow, &t);
     char wd[8], mon[8];
     strftime(wd, sizeof wd, "%a", &t);
     strftime(mon, sizeof mon, "%b", &t);
@@ -306,10 +346,11 @@ void buildModel(const App& app, ScreenModel& m) {
     const Reading& in = app.sensors->inside();
     const Reading& out = app.sensors->outside();
     const Reading& hw = app.sensors->water();
-    m.alert = overdue(in.everSeen, in.at, now, s.alertAgeMin) ||
-              overdue(out.everSeen, out.at, now, s.alertAgeMin) ||
-              overdue(hw.everSeen, hw.at, now, s.alertAgeMin) ||
-              overdue(app.current.valid, app.current.fetchedAt, now,
+    const int64_t nowMono = nowMonoS();
+    m.alert = overdue(in.everSeen, in.at, nowMono, s.alertAgeMin) ||
+              overdue(out.everSeen, out.at, nowMono, s.alertAgeMin) ||
+              overdue(hw.everSeen, hw.at, nowMono, s.alertAgeMin) ||
+              overdue(app.current.valid, app.current.fetchedAt, nowMono,
                       s.alertAgeMin);
   }
 }
@@ -505,6 +546,12 @@ extern "C" void app_main(void) {
   settings.log();
   validateLatLon(settings);
 
+  // Logged as the first useful line of every boot, so the serial log answers "why did
+  // it restart" without needing /healthz to have been polled at the right moment.
+  const char* resetReason = resetReasonName(esp_reset_reason());
+  const int bootCount = bumpBootCount(nvs);
+  ESP_LOGI(TAG, "boot #%d, reset reason: %s", bootCount, resetReason);
+
   static epd::Panel panel;
   ESP_ERROR_CHECK(panel.init());
   panel.configure(settings.panelW, settings.panelH,
@@ -549,6 +596,8 @@ extern "C" void app_main(void) {
   static WeatherClient weather(settings);
   static Sensors sensors(settings, nullptr);  // notify handle set below
   static App app{&settings, &panel, &weather, &sensors, &wifi, nullptr};
+  app.resetReason = resetReason;
+  app.bootCount = bootCount;
 
   auto reconfigure = [] {
     panel.configure(settings.panelW, settings.panelH,
