@@ -12,9 +12,12 @@ tags
 # *.ppm matters: that is what the tool actually writes (*.pbm was aspirational).
 tools/preview/preview
 tools/preview/preview.dSYM/
-tools/preview/*.ppm
-tools/preview/*.pbm
-tools/preview/*.png
+# NOT path-scoped: running ./tools/preview/preview from the repo root writes its
+# renders to the CWD, so seven of them landed in a commit while the ignore rule
+# only covered tools/preview/.
+*.ppm
+*.pbm
+*.png
 
 # Per-machine editor/tooling config (absolute paths, serial ports)
 .vscode/
