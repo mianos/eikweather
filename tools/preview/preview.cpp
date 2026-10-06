@@ -185,7 +185,7 @@ void checkModelEquality() {
     m.outsideValid = true;
     m.outsideTrend = Trend::Falling;
     m.forecastValid = true;
-    snprintf(m.water, sizeof m.water, "48");
+    snprintf(m.grid, sizeof m.grid, "+1.2");
     snprintf(m.date, sizeof m.date, "Wed 5 Aug");
     snprintf(m.rain, sizeof m.rain, "rain 10%%");
     return m;
@@ -231,10 +231,11 @@ void checkModelEquality() {
       {"outsideTrend",[](ScreenModel& m) { m.outsideTrend = Trend::Steady; }},
       {"forecast",    [](ScreenModel& m) { snprintf(m.forecast, sizeof m.forecast, "Clear 6/17"); }},
       {"forecastValid",[](ScreenModel& m) { m.forecastValid = false; }},
-      {"water",       [](ScreenModel& m) { snprintf(m.water, sizeof m.water, "49"); }},
+      {"grid",        [](ScreenModel& m) { snprintf(m.grid, sizeof m.grid, "+1.3"); }},
       {"date",        [](ScreenModel& m) { snprintf(m.date, sizeof m.date, "Thu 6 Aug"); }},
       {"rain",        [](ScreenModel& m) { snprintf(m.rain, sizeof m.rain, "rain 20%%"); }},
       {"alert",       [](ScreenModel& m) { m.alert = true; }},
+      {"gridPending", [](ScreenModel& m) { m.gridPending = true; }},
   };
   int missed = 0;
   for (const Mut& mut : muts) {
@@ -283,24 +284,20 @@ int main() {
          "rain 100%", rainW, kFcMaxW - rainW - 8);
   checkWidth("date widest", epd::Font_Cond, "Wed 28 May", kFcMaxW - rainW - 8);
 
-  // The tank temperature rides on the forecast line, UNLABELLED, so the forecast's
-  // budget shrinks by its width. This is the tightest line on the screen and the
-  // reason the label is off by default: "100" costs 39px and still leaves room for
-  // the pathological forecast, whereas "HWS 100" costs 91px and does not.
-  const int waterW = epd::measureText(epd::Font_Cond, "100").advance + 5 + 1;
-  const int fcBudget = kFcMaxW - waterW - 8;
-  printf("  %-20s %-22s %4d px (forecast budget becomes %d)\n", "water + ring",
-         "100 deg (3 digit)", waterW, fcBudget);
-  checkWidth("fc typical +water", epd::Font_Cond, "Clear 6/16", fcBudget);
-  checkWidth("fc 13ch +water", epd::Font_Cond, "Partly cloudy 6/17", fcBudget);
-  checkWidth("fc worst +water", epd::Font_Cond, "Heavy showers -9/45", fcBudget);
-  checkWidth("fc failed +water", epd::Font_Cond, "forecast unavailable", fcBudget);
-  // What a label would cost, reported rather than asserted: water_label is a
-  // supported setting, it just spends the forecast's width.
-  const int labelledW = epd::measureText(epd::Font_Cond, "HWS 100").advance + 6;
-  printf("  %-20s %-22s %4d px (would leave %d — 13-char conditions truncate)\n",
-         "water WITH label", "HWS 100 deg", labelledW,
-         kFcMaxW - labelledW - 8);
+  // Grid power rides on the forecast line, unlabelled, so the forecast's budget
+  // shrinks by its width. "-88.8" is wider than any real household reading and is
+  // the sizing case; "+1.2kW" is reported to show what a unit would cost.
+  const int gridW = epd::measureText(epd::Font_Cond, "-88.8").advance;
+  const int fcBudget = kFcMaxW - gridW - 8;
+  printf("  %-20s %-22s %4d px (forecast budget becomes %d)\n", "grid widest",
+         "-88.8", gridW, fcBudget);
+  checkWidth("fc typical +grid", epd::Font_Cond, "Clear 6/16", fcBudget);
+  checkWidth("fc 13ch +grid", epd::Font_Cond, "Partly cloudy 6/17", fcBudget);
+  checkWidth("fc worst +grid", epd::Font_Cond, "Heavy showers -9/45", fcBudget);
+  checkWidth("fc failed +grid", epd::Font_Cond, "forecast unavailable", fcBudget);
+  const int unitW = epd::measureText(epd::Font_Cond, "+1.2kW").advance;
+  printf("  %-20s %-22s %4d px (would leave %d)\n", "grid WITH unit", "+1.2kW",
+         unitW, kFcMaxW - unitW - 8);
 
   printf("\nvertical budgets (kH=%d, rule at y=76..78)\n", kH);
   checkVertical("inside label", epd::Font_Label, "IN", kInsideLabelBaseline, 0, 75);
@@ -395,7 +392,7 @@ int main() {
   auto mk = [](const char* name, const char* inL, const char* inT, bool inV,
                Trend inTr, const char* outL, const char* outT, bool outV,
                Trend outTr, const char* fc, const char* date, const char* rain,
-               const char* water) {
+               const char* grid) {
     Case c{name, {}};
     snprintf(c.m.insideLabel, sizeof c.m.insideLabel, "%s", inL);
     snprintf(c.m.insideTemp, sizeof c.m.insideTemp, "%s", inT);
@@ -408,28 +405,28 @@ int main() {
     snprintf(c.m.forecast, sizeof c.m.forecast, "%s", fc);
     snprintf(c.m.date, sizeof c.m.date, "%s", date);
     snprintf(c.m.rain, sizeof c.m.rain, "%s", rain);
-    snprintf(c.m.water, sizeof c.m.water, "%s", water);
+    snprintf(c.m.grid, sizeof c.m.grid, "%s", grid);
     return c;
   };
 
   cases.push_back(mk("normal", "IN", "21.4", true, Trend::Rising, "OUT", "7.8",
                      true, Trend::Falling, "Partly cloudy 6/17", "Wed 5 Aug",
-                     "rain 10%", "48"));
+                     "rain 10%", "+1.2"));
   cases.push_back(mk("widest", "IN", "-12.4", true, Trend::Falling, "OUT",
                      "100.0", true, Trend::Rising, "Heavy showers -9/45",
-                     "Wed 28 May", "rain 100%", "100"));
+                     "Wed 28 May", "rain 100%", "-88.8"));
   cases.push_back(mk("no-mqtt", "IN", "--", false, Trend::Unknown, "OUT", "--",
-                     false, Trend::Unknown, "Clear 6/17", "", "", ""));
+                     false, Trend::Unknown, "Clear 6/17", "", "", "zz"));
   // Steady (measured flat) and Unknown (no history yet) are both blank, so this
   // case must render with an empty arrow column on both rows. Also the case where
-  // the water reading is absent — the forecast should get the full width back.
+  // the grid reading is absent — the forecast should get the full width back.
   cases.push_back(mk("steady", "IN", "19.0", true, Trend::Steady, "OUT", "3.2",
                      true, Trend::Unknown, "Heavy drizzle 2/11", "Sat 12 Jul",
                      "rain 90%", ""));
   // Long labels squeeze the arrow column; the number must still be intact.
   cases.push_back(mk("longlabel", "LOUNGE", "19.0", true, Trend::Rising,
                      "OUTSIDE", "-12.4", true, Trend::Falling, "Clear 2/11",
-                     "Sat 12 Jul", "rain 90%", "HWS 48"));
+                     "Sat 12 Jul", "rain 90%", "-3.4"));
   // The alert on the WIDEST content, not on typical content: the mark has no
   // fallback (unlike the trend arrow, which measures and drops itself), so the case
   // that matters is the one where everything else is at maximum extent and the
@@ -437,7 +434,7 @@ int main() {
   {
     Case c = mk("alert", "IN", "-12.4", true, Trend::Falling, "OUT", "100.0", true,
                 Trend::Rising, "Heavy showers -9/45", "Wed 28 May", "rain 100%",
-                "100");
+                "-88.8");
     c.m.alert = true;
     cases.push_back(c);
 

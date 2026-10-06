@@ -106,7 +106,7 @@ class Sensors {
 
   const Reading& inside() const { return inside_; }
   const Reading& outside() const { return outside_; }
-  const Reading& water() const { return water_; }
+  const Reading& grid() const { return grid_; }
   uint32_t messages() const { return messages_; }
 
  private:
@@ -119,18 +119,21 @@ class Sensors {
     Reading* dest;
     const std::string* field;
     const char* name;
+    // Payload value is divided by this before storing; null => store as-is. A
+    // pointer into Settings, so a POST /config of grid_div applies without reboot.
+    const int* div;
   };
 
   const Settings& settings_;
   TaskHandle_t notify_;
   Reading inside_;
   Reading outside_;
-  Reading water_;
+  Reading grid_;
   uint32_t messages_ = 0;
 
   // One per topic, and they must OUTLIVE attach(): MqttClient keeps the void*
   // context pointer, so these cannot be locals.
   Binding insideBinding_{};
   Binding outsideBinding_{};
-  Binding waterBinding_{};
+  Binding gridBinding_{};
 };

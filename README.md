@@ -8,7 +8,7 @@ Indoor/outdoor temperature and a forecast on a Lonely Binary ESP32 e-ink board
 │  IN     ▲                 21.4°     │  inside, BLACK, rising
 │  OUT    ▼                  7.8°     │  outside, RED, falling
 │═════════════════════════════════════│
-│  Partly cloudy 6/17          48°    │  condition · today's lo/hi · hot water tank
+│  Partly cloudy 6/17          +1.2   │  condition · today's lo/hi · grid kW (+import / -export)
 │  Wed 5 Aug              rain 10%    │  date · chance of rain
 └─────────────────────────────────────┘
 ```
@@ -20,7 +20,7 @@ layout are local.
 
 **It is not a clock.** A full refresh takes 19–25 s and there is no partial refresh
 on this panel, so it repaints only when the drawn content actually changes — about
-once every 10 minutes in practice.
+once every 15 minutes in practice.
 
 ## Build and flash
 

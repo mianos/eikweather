@@ -10,7 +10,7 @@ So it repaints **only when the drawn content changes**, compared on the *formatt
 strings* — exactly the question "would the screen look different?". A 0.01 °C wobble
 that alters no displayed digit costs nothing. Comparing formatted output needs no
 threshold tuning and automatically accounts for rounding, the `--` staleness fallback
-and forecast text changes. `min_interval_min` (default 10) rate-limits repaints,
+and forecast text changes. `min_interval_min` (default 15) rate-limits repaints,
 clamped to ≥3 so a bad setting cannot outpace the vendor's guidance.
 
 **The rate limit is bypassed exactly twice per boot:** the first paint of any kind, and
@@ -90,7 +90,7 @@ weather API failing underneath a display task that is still running.
 
 ### What counts
 
-Any of `inside`, `outside`, `water` or the **forecast** older than the threshold. The
+Any of `inside`, `outside`, `grid` or the **forecast** older than the threshold. The
 forecast is the reason this exists: `app.current` deliberately keeps last-known-good
 forever so a failed fetch never blanks the line, which means a 12-hour-old `Partly
 cloudy 6/16` renders identically to a fresh one with no other way to tell. The three
@@ -264,28 +264,26 @@ number. Measured at `Font_Label`, `OUTSIDE` is 107 px, leaving 108 px for the
 temperature — but `-12.4` needs 118 px and `100.0` needs 130 px. `IN`/`OUT` give the
 number a 158 px budget, which fits everything.
 
-### Why the tank temperature is unlabelled
+### Why grid power is one unlabelled signed number
 
-It rides right-aligned on the forecast line, above the rain chance, with a small degree
-ring. Measured against a 246 px line at 20 pt:
+It rides right-aligned on the forecast line, above the rain chance. At any instant the
+meter is either importing or exporting, never both, so one signed value covers both
+directions: `+1.2` importing, `-3.4` exporting. Measured against a 246 px line at 20 pt:
 
 | Forecast line contents | Width |
 |---|---|
 | `Heavy showers -9/45` (pathological worst) | 188 px |
 | `Partly cloudy 6/17` (realistic worst) | 159 px |
-| bare `100` + degree ring | 39 px |
-| `HWS 100` + degree ring | 91 px |
+| `-88.8` (sizing case) | 46 px |
+| `+1.2kW` | 69 px |
 
-188 + 8 + 39 = 235 fits; 188 + 8 + 91 = 287 does not, and even the realistic
-159 + 8 + 91 = 258 overflows. So a labelled tank temperature and today's lo/hi cannot
-coexist on that line. `water_label` remains a setting for anyone who wants the label
-and will accept the forecast truncating; `tools/preview` prints what it would cost so
-the trade stays visible.
+188 + 8 + 46 = 242 fits. A `kW` unit would fit the realistic worst (159 + 8 + 69 = 236)
+but not the pathological one, so it is left off. Stale or unconfigured draws **nothing**
+rather than `--`: the forecast then reclaims the width, whereas the two big rows each
+own a dedicated row that would look broken if blank.
 
-Integer degrees for the same reason, plus a tenth of a degree on a hot water tank is
-not something anyone acts on. Stale or unconfigured draws **nothing** rather than `--`:
-the forecast then reclaims the width, whereas the two big rows each own a dedicated row
-that would look broken if blank.
+`grid_div` converts the payload to kW. It is required rather than cosmetic: readings are
+stored as tenths clamped to -99.9..999.9, so raw watts would pin at the clamp.
 
 ### Fonts
 

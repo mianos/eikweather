@@ -51,22 +51,23 @@ struct Settings : SettingsBase {
   std::string outsideField = "temperature";
   std::string outsideLabel = "OUT";
 
-  // A third, OPTIONAL reading (the heat pump / hot water tank), shown small and
-  // right-aligned on the forecast line rather than as a third big row — there is
-  // no vertical room for another row, and it is a "is the tank hot" glance, not
-  // something you read from across the room.
+  // A third, OPTIONAL reading: net grid power, shown small and right-aligned on
+  // the forecast line rather than as a third big row — there is no vertical room
+  // for another row. One SIGNED number covers both directions, because at any
+  // instant the meter is either importing or exporting, never both: "+1.2" is
+  // importing 1.2 kW, "-3.4" is exporting 3.4 kW.
   //
   // Empty topic => drawn as nothing at all, and the forecast gets the full width
   // back. Unlike the two big readings it does NOT fall back to "--" when stale:
   // that row is dedicated, so a blank would look broken, whereas this shares the
   // most width-constrained line on the screen and the forecast can use the space.
-  std::string waterTopic = "";
-  std::string waterField = "temperature";
-  // EMPTY on purpose: the forecast line already carries the condition plus today's
-  // lo/hi, and only ~39px is left. Setting this (e.g. "HWS") costs another ~52px,
-  // which truncates the forecast text — available if you would rather have the
-  // label, but it is a real trade, not free.
-  std::string waterLabel = "";
+  std::string gridTopic = "";
+  std::string gridField = "power";
+  // The payload value is divided by this to get kW. 1000 for a meter that publishes
+  // watts, 1 for one that publishes kW. NEGATIVE flips the sign, for a meter that
+  // reports export as positive. Needed, not cosmetic: readings are stored as tenths
+  // clamped to -99.9..999.9, so raw watts would pin at the clamp.
+  int gridDiv = 1000;
 
   // A reading older than this shows "--" rather than leaving a plausible but
   // hours-old number on a display that repaints only every few minutes.
@@ -131,7 +132,7 @@ struct Settings : SettingsBase {
   //
   // minIntervalMin rate-limits repaints. Good Display advise >=180 s between
   // tri-colour refreshes, so this is clamped to >=3 at use (see minIntervalSec).
-  int minIntervalMin = 10;
+  int minIntervalMin = 15;
 
   // How often to re-fetch the Open-Meteo forecast. A fetch only causes a repaint
   // if the condition text or the hi/lo actually changed.
@@ -193,9 +194,9 @@ struct Settings : SettingsBase {
     field("outside_topic", outsideTopic);
     field("outside_field", outsideField);
     field("outside_label", outsideLabel);
-    field("water_topic", waterTopic);
-    field("water_field", waterField);
-    field("water_label", waterLabel);
+    field("grid_topic", gridTopic);
+    field("grid_field", gridField);
+    field("grid_div", gridDiv);
     field("sensor_stale_min", sensorStaleMin);
     field("trend_win_min", trendWinMin);
     field("trend_tenths", trendTenths);

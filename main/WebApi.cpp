@@ -145,7 +145,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   // only floating point left downstream of ingest, and it never feeds a decision.
   const Reading& in = app_.sensors->inside();
   const Reading& out = app_.sensors->outside();
-  const Reading& hw = app_.sensors->water();
+  const Reading& gr = app_.sensors->grid();
   json.AddItem("mqtt_messages", static_cast<int>(app_.sensors->messages()));
   json.AddItem("inside_topic", settings_.insideTopic);
   json.AddItem("inside_seen", in.everSeen);
@@ -166,24 +166,19 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("outside_trend", trendName(out.trend));
   json.AddItem("outside_trend_age_s",
                out.haveRef ? static_cast<int>(now - out.refAt) : -1);
-  // The optional third reading. water_topic "" means it is not configured, which
+  // The optional third reading. grid_topic "" means it is not configured, which
   // is indistinguishable on screen from "configured but stale" — both are blank —
-  // so surface enough here to tell them apart.
-  json.AddItem("water_topic", settings_.waterTopic);
-  json.AddItem("water_seen", hw.everSeen);
-  json.AddItem("water_value", hw.tenths / 10.0);
-  json.AddItem("water_age_s", hw.everSeen ? static_cast<int>(now - hw.at) : -1);
-  json.AddItem("water_fresh", hw.fresh(settings_.sensorStaleMin));
-  // Computed for free by the shared handler and worth surfacing even though there
-  // is no room to draw it: "is the heat pump actually heating right now" is the
-  // most useful thing about a tank temperature.
-  json.AddItem("water_trend", trendName(hw.trend));
-  json.AddItem("water_trend_age_s",
-               hw.haveRef ? static_cast<int>(now - hw.refAt) : -1);
+  // so surface enough here to tell them apart. grid_value is kW AFTER grid_div,
+  // i.e. exactly what the screen shows, so a wrong divisor is visible here.
+  json.AddItem("grid_topic", settings_.gridTopic);
+  json.AddItem("grid_seen", gr.everSeen);
+  json.AddItem("grid_value", gr.tenths / 10.0);
+  json.AddItem("grid_age_s", gr.everSeen ? static_cast<int>(now - gr.at) : -1);
+  json.AddItem("grid_fresh", gr.fresh(settings_.sensorStaleMin));
 
   // The red "!" in the top-right corner. Reported right after the per-source ages
   // above, because those are the answer to "why is it on": whichever of
-  // inside/outside/water/weather has an age past alert_age_min * 60 and was once
+  // inside/outside/grid/weather has an age past alert_age_min * 60 and was once
   // seen. A source that has NEVER been seen never triggers it — that case shows as
   // "--" on the glass instead.
   json.AddItem("alert", app_.alertActive);

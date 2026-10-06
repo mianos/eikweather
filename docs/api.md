@@ -27,16 +27,16 @@ duration, BUSY timeouts, panel geometry and local time, plus:
   restart that happened while nobody was watching — a falling uptime just reads as a
   slow reply.
 - **Freshness of every value**, measured on the monotonic clock: `weather_age_s`,
-  `inside_age_s`, `outside_age_s`, `water_age_s`, and the `*_fresh` booleans that decide
+  `inside_age_s`, `outside_age_s`, `grid_age_s`, and the `*_fresh` booleans that decide
   whether a reading draws as `--`.
 - **Trend state**: `*_trend` and `*_trend_age_s`. An `unknown` trend with an age below
   `trend_win_min * 60` means "not enough history yet", not "sensor is dead".
 - `weather_status` **and** `weather_error`. Status `0` means it never reached HTTP at
   all, and `weather_error` carries the `esp_err_to_name` — which is how
   `ESP_ERR_HTTP_CONNECT` on the first post-boot fetch was identified.
-- `inside_topic` / `outside_topic` / `water_topic` and `mqtt_messages`, enough to
-  diagnose a wrong topic or field name without a serial cable. `water_seen: false` with
-  a non-empty `water_topic` means the publisher is gone, not the display.
+- `inside_topic` / `outside_topic` / `grid_topic` and `mqtt_messages`, enough to
+  diagnose a wrong topic or field name without a serial cable. `grid_seen: false` with
+  a non-empty `grid_topic` means the publisher is gone, not the display.
 - `alert` and `alert_age_min`, immediately after the per-source ages that cause it.
 - `cpu_max_mhz` / `cpu_min_mhz` / `light_sleep` / `wifi_ps`, read back from the
   **driver** rather than from settings, so a `light_sleep: 1` setting against a build
@@ -55,12 +55,12 @@ duration, BUSY timeouts, panel geometry and local time, plus:
 | `mqtt_server` / `mqtt_port` | `mqtt.local` / `1883` | placeholder — point it at your broker |
 | `inside_topic` / `inside_field` / `inside_label` | `""` / `temperature` / `IN` | empty topic ⇒ shows `--` |
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose |
-| `water_topic` / `water_field` | `""` / `temperature` | optional third reading; empty ⇒ not drawn at all |
-| `water_label` | `""` | empty on purpose — a label truncates the forecast |
+| `grid_topic` / `grid_field` | `""` / `power` | optional net grid power; empty ⇒ not drawn at all |
+| `grid_div` | `1000` | payload ÷ this = kW; `1` for a kW payload, negative if export is reported positive |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
 | `trend_win_min` / `trend_tenths` | `10` / `1` | rise/fall window, and deadband in tenths of a degree |
 | `alert_age_min` | `60` | red `!` once a working source goes quiet this long; `0` disables |
-| `min_interval_min` | `10` | rate-limits repaints, clamped to ≥3 |
+| `min_interval_min` | `15` | rate-limits repaints, clamped to ≥3 |
 | `weather_poll_min` | `15` | a failed fetch retries after 60 s regardless |
 | `boot_screen` | `1` | `0` skips the boot/status paint |
 | `panel_w` / `panel_h` | `122` / `250` | fallback `128` / `296` |

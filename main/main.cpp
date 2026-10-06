@@ -280,27 +280,26 @@ void buildModel(const App& app, ScreenModel& m) {
   formatReading(app.sensors->outside(), s.sensorStaleMin, m.outsideTemp,
                 sizeof m.outsideTemp, &m.outsideValid, &m.outsideTrend);
 
-  // The heat pump hot water tank, right-aligned on the forecast line.
+  // Net grid power in kW, right-aligned on the forecast line: "+1.2" importing,
+  // "-3.4" exporting. The explicit '+' is what makes the sign readable as a
+  // direction rather than leaving a bare number that could be either.
   //
-  // INTEGER degrees and NO label by default. Both are width decisions: this line
-  // already carries the condition plus today's lo/hi (up to 188px of 246), so the
-  // number gets the ~39px that is left. A tenth of a degree on a hot water tank is
-  // not something anyone acts on, and a label ("HWS ") costs another 52px, which
-  // would truncate the forecast text — set water_label if you want it anyway.
+  // NO unit and no label: this line already carries the condition plus today's
+  // lo/hi (up to 188px of 246), and "kW" alone costs ~22px, which would truncate
+  // the longest forecasts.
   //
-  // Stale or unconfigured leaves it EMPTY rather than "--": the forecast then gets
-  // that width back, whereas the two big rows have a dedicated row each that would
-  // look broken if blank.
-  const Reading& w = app.sensors->water();
-  if (w.fresh(s.sensorStaleMin)) {
-    // wholeDegrees rounds half-away-from-zero in integer arithmetic; Reading has
-    // already clamped the range, so nothing here can render as "-2147483648".
-    const int t = wholeDegrees(w.tenths);
-    if (s.waterLabel.empty()) {
-      snprintf(m.water, sizeof m.water, "%d", t);
-    } else {
-      snprintf(m.water, sizeof m.water, "%s %d", s.waterLabel.c_str(), t);
-    }
+  // Unconfigured leaves it EMPTY so the forecast gets the width back. Configured
+  // but not fresh shows "zz": the topic is published once a minute and not
+  // necessarily retained, so right after boot there is nothing yet, and a blank
+  // there was indistinguishable from "not set up".
+  const Reading& g = app.sensors->grid();
+  if (g.fresh(s.sensorStaleMin)) {
+    char kw[12];
+    formatTenths(kw, sizeof kw, g.tenths);
+    snprintf(m.grid, sizeof m.grid, "%s%s", g.tenths > 0 ? "+" : "", kw);
+  } else if (!s.gridTopic.empty()) {
+    snprintf(m.grid, sizeof m.grid, "zz");
+    m.gridPending = true;
   }
 
   // "<condition> <lo>/<hi>" on the forecast line; the rain chance goes on the date
@@ -345,11 +344,11 @@ void buildModel(const App& app, ScreenModel& m) {
   if (s.alertAgeMin > 0) {
     const Reading& in = app.sensors->inside();
     const Reading& out = app.sensors->outside();
-    const Reading& hw = app.sensors->water();
+    const Reading& gr = app.sensors->grid();
     const int64_t nowMono = nowMonoS();
     m.alert = overdue(in.everSeen, in.at, nowMono, s.alertAgeMin) ||
               overdue(out.everSeen, out.at, nowMono, s.alertAgeMin) ||
-              overdue(hw.everSeen, hw.at, nowMono, s.alertAgeMin) ||
+              overdue(gr.everSeen, gr.at, nowMono, s.alertAgeMin) ||
               overdue(app.current.valid, app.current.fetchedAt, nowMono,
                       s.alertAgeMin);
   }
@@ -363,7 +362,7 @@ void buildModel(const App& app, ScreenModel& m) {
 // A flag, not strstr() on the forecast text: sniffing for "unavailable" broke
 // silently the moment that string was shortened for the new layout.
 bool complete(const ScreenModel& m) {
-  return m.insideValid && m.outsideValid && m.forecastValid;
+  return m.insideValid && m.outsideValid && m.forecastValid && !m.gridPending;
 }
 
 // Everything that is actually drawn. Comparing this is what decides whether a
@@ -511,7 +510,7 @@ void displayTask(void* arg) {
                "painted %s %s %s | %s %s %s | %s | %s%s | heap %u min %u | stack %d",
                want.insideLabel, want.insideTemp, trendName(want.insideTrend),
                want.outsideLabel, want.outsideTemp,
-               trendName(want.outsideTrend), want.water, want.forecast,
+               trendName(want.outsideTrend), want.grid, want.forecast,
                want.alert ? " | STALE(!)" : "",
                static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()),
@@ -613,7 +612,7 @@ extern "C" void app_main(void) {
     settings.onChange(key, reconfigure);
   }
   // Anything that changes what is drawn or how often — takes effect immediately.
-  for (const char* key : {"inside_label", "outside_label", "water_label",
+  for (const char* key : {"inside_label", "outside_label", "grid_div",
                           "sensor_stale_min", "min_interval_min",
                           "weather_poll_min", "alert_age_min"}) {
     settings.onChange(key, [] {
@@ -634,7 +633,7 @@ extern "C" void app_main(void) {
   // means a restart. Say so rather than leaving it silently ineffective.
   for (const char* key : {"mqtt_server", "mqtt_port", "inside_topic",
                           "inside_field", "outside_topic", "outside_field",
-                          "water_topic", "water_field"}) {
+                          "grid_topic", "grid_field"}) {
     settings.onChange(key, [] {
       ESP_LOGW(TAG, "MQTT settings changed — POST /reboot to apply");
     });

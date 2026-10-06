@@ -22,7 +22,7 @@
 //            solid triangle: up if rising, down if falling,
 //            nothing at all if steady or not yet known
 //  y=76 |===================================================|  RED rule
-//  y=94 |  Partly cloudy 6/17                          48°  |  Font_Cond
+//  y=94 |  Partly cloudy 6/17                         +1.2  |  Font_Cond
 //  y=116|  Wed 5 Aug                            rain 10%    |  Font_Cond
 //       +---------------------------------------------------+
 //
@@ -31,8 +31,8 @@
 // against a 246px line, so one of them would always truncate. Font_Big was reduced
 // 52pt -> 44pt to buy the second line.
 //
-// Both bottom lines carry a right-aligned passenger (the water temperature and
-// the rain chance). In each case the passenger is drawn FIRST and the left item's
+// Both bottom lines carry a right-aligned passenger (the grid power and the
+// rain chance). In each case the passenger is drawn FIRST and the left item's
 // budget shrinks around its measured width, so the left item truncates with ".."
 // before they can ever collide. There is no vertical room for a third line: the
 // band below the rule is 43px and Font_Cond needs ~19px a line.
@@ -83,9 +83,6 @@ constexpr int kSepH = 3;
 constexpr int kFcBaseline = 94;
 constexpr int kDateBaseline = 116;
 constexpr int kFcMaxW = 246;  // x=4..249, the full remaining width
-// Degree ring for the small water reading. r=2, not the big rows' r=4: it has to
-// read as a degree sign against 20pt text, not 44pt.
-constexpr int kSmallDegreeR = 2;
 constexpr int kRightMargin = 4;
 constexpr int kPassengerGap = 8;  // clearance between a line's two items
 
@@ -199,18 +196,11 @@ void renderScreen(epd::Canvas& c, const ScreenModel& m) {
   // Both bottom lines: right-aligned passenger FIRST, then the left item with a
   // budget shrunk around the passenger's measured width.
   int fcBudget = kFcMaxW;
-  if (m.water[0]) {
-    // The ring sits beyond the digits, so the text right-aligns short of the
-    // margin by the ring's full width.
-    const int ringW = 2 * kSmallDegreeR + 1;
-    const int ringCx = c.width() - kRightMargin - kSmallDegreeR;
-    epd::drawTextRight(c, epd::Font_Cond, ringCx - kSmallDegreeR - 1, kFcBaseline,
-                       m.water, epd::Color::Black);
-    // -12: Font_Cond's cap height, so the ring aligns with the tops of the
-    // digits rather than floating above them.
-    epd::drawDegree(c, ringCx, kFcBaseline - 12, kSmallDegreeR, epd::Color::Black);
-    fcBudget -= epd::measureText(epd::Font_Cond, m.water).advance + ringW + 1 +
-                kPassengerGap;
+  if (m.grid[0]) {
+    epd::drawTextRight(c, epd::Font_Cond, c.width() - kRightMargin, kFcBaseline,
+                       m.grid, epd::Color::Black);
+    fcBudget -=
+        epd::measureText(epd::Font_Cond, m.grid).advance + kPassengerGap;
     if (fcBudget < 40) fcBudget = 40;
   }
   if (m.forecast[0]) {

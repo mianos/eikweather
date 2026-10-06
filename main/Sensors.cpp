@@ -24,6 +24,8 @@ esp_err_t Sensors::onMessage(MqttClient*, const std::string& topic,
     return ESP_OK;
   }
 
+  if (b->div && *b->div != 0) v /= *b->div;
+
   // The only float -> fixed-point conversion in the data path. cJSON handed us a
   // double (it parses every JSON number as one); from here on it is all integers.
   b->dest->tenths = tenthsFromDegrees(v);
@@ -53,24 +55,25 @@ void Sensors::attach(MqttClient& mqtt) {
     Reading* dest;
     Binding* binding;
     const char* name;
+    const int* div;
   };
   const Spec specs[] = {
       {settings_.insideTopic, settings_.insideField, &inside_, &insideBinding_,
-       "inside"},
+       "inside", nullptr},
       {settings_.outsideTopic, settings_.outsideField, &outside_,
-       &outsideBinding_, "outside"},
-      {settings_.waterTopic, settings_.waterField, &water_, &waterBinding_,
-       "water"},
+       &outsideBinding_, "outside", nullptr},
+      {settings_.gridTopic, settings_.gridField, &grid_, &gridBinding_, "grid",
+       &settings_.gridDiv},
   };
 
   for (const Spec& s : specs) {
     if (s.topic.empty()) {
-      // inside/outside fall back to "--"; water is simply omitted. Don't claim
+      // inside/outside fall back to "--"; grid is simply omitted. Don't claim
       // either here.
       ESP_LOGW(TAG, "%s topic not configured", s.name);
       continue;
     }
-    *s.binding = Binding{this, s.dest, &s.field, s.name};
+    *s.binding = Binding{this, s.dest, &s.field, s.name, s.div};
 
     // MqttClient dispatches on a std::regex match against the topic. These are
     // exact topics, so escape any regex metacharacters ('+' and '$' are legal in
