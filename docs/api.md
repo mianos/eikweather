@@ -56,7 +56,7 @@ duration, BUSY timeouts, panel geometry and local time, plus:
 | `inside_topic` / `inside_field` / `inside_label` | `""` / `temperature` / `IN` | empty topic ⇒ shows `--` |
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose |
 | `grid_topic` / `grid_field` | `""` / `power` | optional net grid power; empty ⇒ not drawn at all |
-| `grid_div` | `1000` | payload ÷ this = kW; `1` for a kW payload, negative if export is reported positive |
+| `grid_div` | `-1000` | payload ÷ this = kW (+ exporting, − importing); magnitude `1` for a kW payload; positive if the meter already reports export as positive |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
 | `trend_win_min` / `trend_tenths` | `10` / `1` | rise/fall window, and deadband in tenths of a degree |
 | `alert_age_min` | `60` | red `!` once a working source goes quiet this long; `0` disables |

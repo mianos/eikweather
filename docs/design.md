@@ -268,7 +268,7 @@ number a 158 px budget, which fits everything.
 
 It rides right-aligned on the forecast line, above the rain chance. At any instant the
 meter is either importing or exporting, never both, so one signed value covers both
-directions: `+1.2` importing, `-3.4` exporting. Measured against a 246 px line at 20 pt:
+directions: `+3.4` exporting, `-1.2` importing. Measured against a 246 px line at 20 pt:
 
 | Forecast line contents | Width |
 |---|---|

@@ -54,8 +54,8 @@ struct Settings : SettingsBase {
   // A third, OPTIONAL reading: net grid power, shown small and right-aligned on
   // the forecast line rather than as a third big row — there is no vertical room
   // for another row. One SIGNED number covers both directions, because at any
-  // instant the meter is either importing or exporting, never both: "+1.2" is
-  // importing 1.2 kW, "-3.4" is exporting 3.4 kW.
+  // instant the meter is either importing or exporting, never both: "+3.4" is
+  // exporting 3.4 kW (net positive), "-1.2" is importing 1.2 kW.
   //
   // Empty topic => drawn as nothing at all, and the forecast gets the full width
   // back. Unlike the two big readings it does NOT fall back to "--" when stale:
@@ -63,11 +63,13 @@ struct Settings : SettingsBase {
   // most width-constrained line on the screen and the forecast can use the space.
   std::string gridTopic = "";
   std::string gridField = "power";
-  // The payload value is divided by this to get kW. 1000 for a meter that publishes
-  // watts, 1 for one that publishes kW. NEGATIVE flips the sign, for a meter that
-  // reports export as positive. Needed, not cosmetic: readings are stored as tenths
-  // clamped to -99.9..999.9, so raw watts would pin at the clamp.
-  int gridDiv = 1000;
+  // The payload value is divided by this to get kW: magnitude 1000 for a meter
+  // that publishes watts, 1 for one that publishes kW. The SIGN sets the display
+  // convention: negative for a meter that reports import as positive (the iMeter
+  // does), positive for one that already reports export as positive. Needed, not
+  // cosmetic: readings are stored as tenths clamped to -99.9..999.9, so raw watts
+  // would pin at the clamp.
+  int gridDiv = -1000;
 
   // A reading older than this shows "--" rather than leaving a plausible but
   // hours-old number on a display that repaints only every few minutes.

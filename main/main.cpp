@@ -280,8 +280,8 @@ void buildModel(const App& app, ScreenModel& m) {
   formatReading(app.sensors->outside(), s.sensorStaleMin, m.outsideTemp,
                 sizeof m.outsideTemp, &m.outsideValid, &m.outsideTrend);
 
-  // Net grid power in kW, right-aligned on the forecast line: "+1.2" importing,
-  // "-3.4" exporting. The explicit '+' is what makes the sign readable as a
+  // Net grid power in kW, right-aligned on the forecast line: "+3.4" exporting,
+  // "-1.2" importing. The explicit '+' is what makes the sign readable as a
   // direction rather than leaving a bare number that could be either.
   //
   // NO unit and no label: this line already carries the condition plus today's

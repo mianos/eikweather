@@ -8,7 +8,7 @@ Indoor/outdoor temperature and a forecast on a Lonely Binary ESP32 e-ink board
 │  IN     ▲                 21.4°     │  inside, BLACK, rising
 │  OUT    ▼                  7.8°     │  outside, RED, falling
 │═════════════════════════════════════│
-│  Partly cloudy 6/17          +1.2   │  condition · today's lo/hi · grid kW (+import / -export)
+│  Partly cloudy 6/17          +1.2   │  condition · today's lo/hi · grid kW (+export / -import)
 │  Wed 5 Aug              rain 10%    │  date · chance of rain
 └─────────────────────────────────────┘
 ```

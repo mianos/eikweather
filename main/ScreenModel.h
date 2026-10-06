@@ -42,8 +42,8 @@ struct ScreenModel {
   // once a day, so it costs one refresh per day. A time would cost one per minute.
   char forecast[48] = {};      // "Clear 6/16" — condition and today's low/high
   bool forecastValid = false;  // false => the fetch has never succeeded
-  // Third reading: net grid power in kW, signed ("+1.2" importing, "-3.4"
-  // exporting), right-aligned on the FORECAST line directly above the rain chance.
+  // Third reading: net grid power in kW, signed ("+3.4" exporting, "-1.2"
+  // importing), right-aligned on the FORECAST line directly above the rain chance.
   //
   // No unit, no label, no ring. It shares the tightest line on the screen:
   // measured, the condition plus today's lo/hi is up to 188px of a 246px line, so
