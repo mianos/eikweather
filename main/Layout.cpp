@@ -22,8 +22,8 @@
 //            solid triangle: up if rising, down if falling,
 //            nothing at all if steady or not yet known
 //  y=76 |===================================================|  RED rule
-//  y=94 |  Partly cloudy 6/17                         +1.2  |  Font_Cond
-//  y=116|  Wed 5 Aug                            rain 10%    |  Font_Cond
+//  y=94 |  Partly cloudy 6/17                         +1.8  |  Font_Cond
+//  y=116|  Wed 5                        10%          +12.4  |  Font_Cond
 //       +---------------------------------------------------+
 //
 // The forecast and the date each get their OWN full-width line. Sharing one line
@@ -31,10 +31,11 @@
 // against a 246px line, so one of them would always truncate. Font_Big was reduced
 // 52pt -> 44pt to buy the second line.
 //
-// Both bottom lines carry a right-aligned passenger (the grid power and the
-// rain chance). In each case the passenger is drawn FIRST and the left item's
-// budget shrinks around its measured width, so the left item truncates with ".."
-// before they can ever collide. There is no vertical room for a third line: the
+// Both bottom lines carry right-aligned passengers: the grid average on the
+// forecast line; the rain chance and today's grid kWh on the date line, the grid
+// figures forming one right-hand column. Passengers are drawn FIRST, right to
+// left, and the left item's budget shrinks around their measured widths, so the
+// left item truncates with ".." before anything can collide. There is no vertical room for a third line: the
 // band below the rule is 43px and Font_Cond needs ~19px a line.
 //
 // Inside is BLACK and outside is RED. That is the one piece of colour that earns
@@ -193,14 +194,14 @@ void renderScreen(epd::Canvas& c, const ScreenModel& m) {
 
   epd::fillRect(c, 0, kSepY, c.width(), kSepH, epd::Color::Red);
 
-  // Both bottom lines: right-aligned passenger FIRST, then the left item with a
-  // budget shrunk around the passenger's measured width.
+  // Both bottom lines: right-aligned passengers FIRST, then the left item with a
+  // budget shrunk around their measured widths.
   int fcBudget = kFcMaxW;
-  if (m.grid[0]) {
+  if (m.gridAvg[0]) {
     epd::drawTextRight(c, epd::Font_Cond, c.width() - kRightMargin, kFcBaseline,
-                       m.grid, epd::Color::Black);
+                       m.gridAvg, epd::Color::Black);
     fcBudget -=
-        epd::measureText(epd::Font_Cond, m.grid).advance + kPassengerGap;
+        epd::measureText(epd::Font_Cond, m.gridAvg).advance + kPassengerGap;
     if (fcBudget < 40) fcBudget = 40;
   }
   if (m.forecast[0]) {
@@ -209,13 +210,16 @@ void renderScreen(epd::Canvas& c, const ScreenModel& m) {
   }
 
   int dateBudget = kFcMaxW;
-  if (m.rain[0]) {
-    epd::drawTextRight(c, epd::Font_Cond, c.width() - kRightMargin,
-                       kDateBaseline, m.rain, epd::Color::Black);
-    dateBudget -=
-        epd::measureText(epd::Font_Cond, m.rain).advance + kPassengerGap;
-    if (dateBudget < 40) dateBudget = 40;
+  int rightX = c.width() - kRightMargin;
+  for (const char* passenger : {m.gridToday, m.rain}) {
+    if (!passenger[0]) continue;
+    epd::drawTextRight(c, epd::Font_Cond, rightX, kDateBaseline, passenger,
+                       epd::Color::Black);
+    const int w = epd::measureText(epd::Font_Cond, passenger).advance;
+    rightX -= w + kPassengerGap;
+    dateBudget -= w + kPassengerGap;
   }
+  if (dateBudget < 40) dateBudget = 40;
   if (m.date[0]) {
     epd::drawTextClipped(c, epd::Font_Cond, kLabelX, kDateBaseline, dateBudget,
                          m.date, epd::Color::Black);

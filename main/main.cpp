@@ -280,26 +280,37 @@ void buildModel(const App& app, ScreenModel& m) {
   formatReading(app.sensors->outside(), s.sensorStaleMin, m.outsideTemp,
                 sizeof m.outsideTemp, &m.outsideValid, &m.outsideTrend);
 
-  // Net grid power in kW, right-aligned on the forecast line: "+3.4" exporting,
-  // "-1.2" importing. The explicit '+' is what makes the sign readable as a
-  // direction rather than leaving a bare number that could be either.
+  // Grid energy: average kW over the last min_interval_min on the forecast line,
+  // net kWh since midnight on the date line. Both signed, "+" = net exporting, and
+  // the explicit '+' is what makes the sign read as a direction.
   //
-  // NO unit and no label: this line already carries the condition plus today's
-  // lo/hi (up to 188px of 246), and "kW" alone costs ~22px, which would truncate
-  // the longest forecasts.
+  // No units and no labels: neither fits (see docs/design.md). Position is the
+  // key — top is the last quarter-hour, bottom is the day so far.
   //
-  // Unconfigured leaves it EMPTY so the forecast gets the width back. Configured
-  // but not fresh shows "zz": the topic is published once a minute and not
-  // necessarily retained, so right after boot there is nothing yet, and a blank
-  // there was indistinguishable from "not set up".
-  const Reading& g = app.sensors->grid();
-  if (g.fresh(s.sensorStaleMin)) {
-    char kw[12];
-    formatTenths(kw, sizeof kw, g.tenths);
-    snprintf(m.grid, sizeof m.grid, "%s%s", g.tenths > 0 ? "+" : "", kw);
-  } else if (!s.gridTopic.empty()) {
-    snprintf(m.grid, sizeof m.grid, "zz");
-    m.gridPending = true;
+  // Unconfigured leaves both EMPTY so the lines get their width back. Configured
+  // but not yet computable shows "zz": no data since boot, gone stale, under five
+  // minutes of history for the average, or no midnight baseline for today yet.
+  if (!s.gridTopic.empty()) {
+    const GridEnergy g = app.sensors->grid();
+    const int64_t nowMono = nowMonoS();
+    const int staleS = s.sensorStaleMin * 60;
+    const int32_t today = localDayKey();
+    auto put = [&](char* out, size_t n, bool ok, int tenths) {
+      if (!ok) {
+        snprintf(out, n, "zz");
+        m.gridPending = true;
+        return;
+      }
+      char v[12];
+      formatTenths(v, sizeof v, tenths);
+      snprintf(out, n, "%s%s", tenths > 0 ? "+" : "", v);
+    };
+    int t = 0;
+    const bool avgOk =
+        g.avgTenthsKw(nowMono, s.minIntervalSec(), GridEnergy::kMinAvgS, staleS, &t);
+    put(m.gridAvg, sizeof m.gridAvg, avgOk, t);
+    const bool dayOk = g.todayTenthsKwh(today, nowMono, staleS, &t);
+    put(m.gridToday, sizeof m.gridToday, dayOk, t);
   }
 
   // "<condition> <lo>/<hi>" on the forecast line; the rain chance goes on the date
@@ -313,7 +324,7 @@ void buildModel(const App& app, ScreenModel& m) {
       // "rain -2147483648%". Also keeps snprintf inside the buffer, which
       // -Werror=format-truncation checks against the full int range.
       const int pct = app.current.rainPct > 100 ? 100 : app.current.rainPct;
-      snprintf(m.rain, sizeof m.rain, "rain %d%%", pct);
+      snprintf(m.rain, sizeof m.rain, "%d%%", pct);
     }
   } else {
     snprintf(m.forecast, sizeof m.forecast, "%s", "forecast unavailable");
@@ -332,10 +343,9 @@ void buildModel(const App& app, ScreenModel& m) {
   if (wallNow >= kPlausibleTime) {
     struct tm t;
     localtime_r(&wallNow, &t);
-    char wd[8], mon[8];
+    char wd[8];
     strftime(wd, sizeof wd, "%a", &t);
-    strftime(mon, sizeof mon, "%b", &t);
-    snprintf(m.date, sizeof m.date, "%s %d %s", wd, t.tm_mday, mon);
+    snprintf(m.date, sizeof m.date, "%s %d", wd, t.tm_mday);
   }
 
   // Stale-data alert, checked against every source INCLUDING the forecast — which
@@ -344,7 +354,7 @@ void buildModel(const App& app, ScreenModel& m) {
   if (s.alertAgeMin > 0) {
     const Reading& in = app.sensors->inside();
     const Reading& out = app.sensors->outside();
-    const Reading& gr = app.sensors->grid();
+    const GridEnergy gr = app.sensors->grid();
     const int64_t nowMono = nowMonoS();
     m.alert = overdue(in.everSeen, in.at, nowMono, s.alertAgeMin) ||
               overdue(out.everSeen, out.at, nowMono, s.alertAgeMin) ||
@@ -510,7 +520,7 @@ void displayTask(void* arg) {
                "painted %s %s %s | %s %s %s | %s | %s%s | heap %u min %u | stack %d",
                want.insideLabel, want.insideTemp, trendName(want.insideTrend),
                want.outsideLabel, want.outsideTemp,
-               trendName(want.outsideTrend), want.grid, want.forecast,
+               trendName(want.outsideTrend), want.gridAvg, want.forecast,
                want.alert ? " | STALE(!)" : "",
                static_cast<unsigned>(esp_get_free_heap_size()),
                static_cast<unsigned>(esp_get_minimum_free_heap_size()),
@@ -593,7 +603,7 @@ extern "C" void app_main(void) {
   ESP_ERROR_CHECK(esp_netif_sntp_init(&sntpCfg));
 
   static WeatherClient weather(settings);
-  static Sensors sensors(settings, nullptr);  // notify handle set below
+  static Sensors sensors(settings, nvs, nullptr);  // notify handle set below
   static App app{&settings, &panel, &weather, &sensors, &wifi, nullptr};
   app.resetReason = resetReason;
   app.bootCount = bootCount;
@@ -612,7 +622,7 @@ extern "C" void app_main(void) {
     settings.onChange(key, reconfigure);
   }
   // Anything that changes what is drawn or how often — takes effect immediately.
-  for (const char* key : {"inside_label", "outside_label", "grid_div",
+  for (const char* key : {"inside_label", "outside_label",
                           "sensor_stale_min", "min_interval_min",
                           "weather_poll_min", "alert_age_min"}) {
     settings.onChange(key, [] {
@@ -633,7 +643,8 @@ extern "C" void app_main(void) {
   // means a restart. Say so rather than leaving it silently ineffective.
   for (const char* key : {"mqtt_server", "mqtt_port", "inside_topic",
                           "inside_field", "outside_topic", "outside_field",
-                          "grid_topic", "grid_field"}) {
+                          "grid_topic", "grid_import_field",
+                          "grid_export_field"}) {
     settings.onChange(key, [] {
       ESP_LOGW(TAG, "MQTT settings changed — POST /reboot to apply");
     });

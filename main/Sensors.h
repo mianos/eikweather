@@ -1,9 +1,12 @@
 #pragma once
 #include <cstdint>
+#include <mutex>
 #include <string>
 
+#include "GridEnergy.h"
 #include "Monotonic.h"
 #include "MqttClient.h"
+#include "NvsStorageManager.h"
 #include "Settings.h"
 #include "Tenths.h"
 #include "Trend.h"
@@ -92,10 +95,15 @@ struct Reading {
   }
 };
 
+// Local date as YYYYMMDD, or 0 while the wall clock is still at its 1970 boot
+// value. Keys the grid's "today" figure; shared so that the reading side and the
+// display side can never disagree about what day it is.
+int32_t localDayKey();
+
 class Sensors {
  public:
-  Sensors(const Settings& settings, TaskHandle_t notify)
-      : settings_(settings), notify_(notify) {}
+  Sensors(const Settings& settings, NvsStorageManager& nvs, TaskHandle_t notify)
+      : settings_(settings), nvs_(nvs), notify_(notify) {}
 
   // The display task is created after Sensors, so its handle arrives late.
   void setNotify(TaskHandle_t t) { notify_ = t; }
@@ -106,7 +114,12 @@ class Sensors {
 
   const Reading& inside() const { return inside_; }
   const Reading& outside() const { return outside_; }
-  const Reading& grid() const { return grid_; }
+  // A COPY, taken under the lock: the ring is several hundred bytes written by the
+  // MQTT task, and reading it in place from the display task could tear.
+  GridEnergy grid() const {
+    std::lock_guard<std::mutex> lock(gridMutex_);
+    return grid_;
+  }
   uint32_t messages() const { return messages_; }
 
  private:
@@ -119,21 +132,24 @@ class Sensors {
     Reading* dest;
     const std::string* field;
     const char* name;
-    // Payload value is divided by this before storing; null => store as-is. A
-    // pointer into Settings, so a POST /config of grid_div applies without reboot.
-    const int* div;
   };
 
+  static esp_err_t onGridMessage(MqttClient* client, const std::string& topic,
+                                const JsonWrapper& json, void* context);
+  void subscribeExact(MqttClient& mqtt, const std::string& topic,
+                      HandlerFunc handler, void* context);
+
   const Settings& settings_;
+  NvsStorageManager& nvs_;
   TaskHandle_t notify_;
   Reading inside_;
   Reading outside_;
-  Reading grid_;
+  mutable std::mutex gridMutex_;
+  GridEnergy grid_;
   uint32_t messages_ = 0;
 
   // One per topic, and they must OUTLIVE attach(): MqttClient keeps the void*
   // context pointer, so these cannot be locals.
   Binding insideBinding_{};
   Binding outsideBinding_{};
-  Binding gridBinding_{};
 };

@@ -51,25 +51,21 @@ struct Settings : SettingsBase {
   std::string outsideField = "temperature";
   std::string outsideLabel = "OUT";
 
-  // A third, OPTIONAL reading: net grid power, shown small and right-aligned on
-  // the forecast line rather than as a third big row — there is no vertical room
-  // for another row. One SIGNED number covers both directions, because at any
-  // instant the meter is either importing or exporting, never both: "+3.4" is
-  // exporting 3.4 kW (net positive), "-1.2" is importing 1.2 kW.
+  // OPTIONAL grid energy, from a meter publishing its two CUMULATIVE counters
+  // (kWh) as fields of one JSON payload. Two numbers are drawn, both signed with
+  // "+" meaning net exporting: average kW over the last min_interval_min, on the
+  // forecast line, and net kWh since local midnight, on the date line. See
+  // GridEnergy.h for why counters rather than instantaneous power.
   //
-  // Empty topic => drawn as nothing at all, and the forecast gets the full width
-  // back. Unlike the two big readings it does NOT fall back to "--" when stale:
-  // that row is dedicated, so a blank would look broken, whereas this shares the
-  // most width-constrained line on the screen and the forecast can use the space.
+  // Empty topic => neither is drawn and both lines get their width back.
+  // Configured but waiting (no data yet, or stale) => "zz".
+  //
+  // Defaults match the iMeter as relayed by Node-RED: forwardEnergy is import,
+  // reverseEnergy is export (checked against the meter: only reverseEnergy rose
+  // while it reported negative power).
   std::string gridTopic = "";
-  std::string gridField = "power";
-  // The payload value is divided by this to get kW: magnitude 1000 for a meter
-  // that publishes watts, 1 for one that publishes kW. The SIGN sets the display
-  // convention: negative for a meter that reports import as positive (the iMeter
-  // does), positive for one that already reports export as positive. Needed, not
-  // cosmetic: readings are stored as tenths clamped to -99.9..999.9, so raw watts
-  // would pin at the clamp.
-  int gridDiv = -1000;
+  std::string gridImportField = "forwardEnergy";
+  std::string gridExportField = "reverseEnergy";
 
   // A reading older than this shows "--" rather than leaving a plausible but
   // hours-old number on a display that repaints only every few minutes.
@@ -197,8 +193,8 @@ struct Settings : SettingsBase {
     field("outside_field", outsideField);
     field("outside_label", outsideLabel);
     field("grid_topic", gridTopic);
-    field("grid_field", gridField);
-    field("grid_div", gridDiv);
+    field("grid_import_field", gridImportField);
+    field("grid_export_field", gridExportField);
     field("sensor_stale_min", sensorStaleMin);
     field("trend_win_min", trendWinMin);
     field("trend_tenths", trendTenths);

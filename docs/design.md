@@ -116,10 +116,8 @@ luck. The readings right-align at `kTempRightX` (232) and their degree ring ends
 Everything else that looks empty is only what a particular date, forecast or label
 happened to leave. Taking the union of inked pixels across every `tools/preview` case,
 the screen is 51% covered and the next-largest guaranteed-free box is 12 px wide,
-narrowing as labels lengthen. The date line does have ~35 px of slack (widest date
-`Wed 28 May` = 113 px, widest `rain 100%` = 90 px, 8 px gap, against 246 px), enough
-for a 14 px warning triangle — but it would compete with text, and the corner competes
-with nothing.
+narrowing as labels lengthen. Any slack on the date line is now spent on the grid
+figure, and the corner competes with nothing.
 
 7 px sounds too narrow for a glyph until you measure one: `Font_Label` covers all of
 `0x20..0x7E`, so a properly tapered `!` already exists, and its **ink is only 4 px
@@ -264,26 +262,43 @@ number. Measured at `Font_Label`, `OUTSIDE` is 107 px, leaving 108 px for the
 temperature — but `-12.4` needs 118 px and `100.0` needs 130 px. `IN`/`OUT` give the
 number a 158 px budget, which fits everything.
 
-### Why grid power is one unlabelled signed number
+### Grid energy: two unlabelled signed numbers
 
-It rides right-aligned on the forecast line, above the rain chance. At any instant the
-meter is either importing or exporting, never both, so one signed value covers both
-directions: `+3.4` exporting, `-1.2` importing. Measured against a 246 px line at 20 pt:
+A right-hand column under the rule: **average kW over the last `min_interval_min`** on
+the forecast line, **net kWh since local midnight** on the date line. Both are export
+minus import, so `+` is net exporting. Position is the only key; there is no room for
+units.
+
+**Counters, not instantaneous power.** The screen repaints about every 15 minutes, so a
+single power sample is close to noise on a cloudy day. The meter's cumulative import
+and export counters make both figures exact differences with no sampling error. They
+step in 0.01 kWh, which over a 15-minute window is 0.04 kW; the average is withheld
+until it spans at least 5 minutes (one step over a single minute would be 0.6 kW of
+noise).
+
+**Midnight baseline.** The net counter at the first sample of each local day is kept in
+NVS (`grid_day`), one write a day, so a reboot does not restart "today" from zero. If
+the board was down over midnight the baseline is taken at its first sample, so that
+day undercounts. A counter that goes backwards is treated as a meter reset and rebases.
+
+**What it cost.** The date line could not take a third item as it was: `Wed 28 May`
+(113 px) + `rain 100%` (90) + the grid figure (51) + gaps is 24 px over 246. The month
+and the word "rain" went: `Wed 28` + `100%` + `+88.8` leaves the date a 128 px budget.
 
 | Forecast line contents | Width |
 |---|---|
 | `Heavy showers -9/45` (pathological worst) | 188 px |
 | `Partly cloudy 6/17` (realistic worst) | 159 px |
-| `-88.8` (sizing case) | 46 px |
-| `+1.2kW` | 69 px |
+| `+88.8` (sizing case; `+` is 5 px wider than `-`) | 51 px |
+| `+9.9` | 40 px |
 
-188 + 8 + 46 = 242 fits. A `kW` unit would fit the realistic worst (159 + 8 + 69 = 236)
-but not the pathological one, so it is left off. Stale or unconfigured draws **nothing**
-rather than `--`: the forecast then reclaims the width, whereas the two big rows each
-own a dedicated row that would look broken if blank.
+The pathological forecast fits beside any single-digit average and truncates by 1 px
+(to `-9/..`) beside an export average of 10 kW or more. `tools/preview` reports this
+rather than asserting it.
 
-`grid_div` converts the payload to kW. It is required rather than cosmetic: readings are
-stored as tenths clamped to -99.9..999.9, so raw watts would pin at the clamp.
+`zz` means configured but not yet computable: no data, stale, under 5 minutes of
+history, or no baseline for today. Unconfigured draws **nothing**, so both lines get
+their width back.
 
 ### Fonts
 

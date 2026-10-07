@@ -145,7 +145,7 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   // only floating point left downstream of ingest, and it never feeds a decision.
   const Reading& in = app_.sensors->inside();
   const Reading& out = app_.sensors->outside();
-  const Reading& gr = app_.sensors->grid();
+  const GridEnergy gr = app_.sensors->grid();
   json.AddItem("mqtt_messages", static_cast<int>(app_.sensors->messages()));
   json.AddItem("inside_topic", settings_.insideTopic);
   json.AddItem("inside_seen", in.everSeen);
@@ -166,15 +166,30 @@ void WebApi::populate_healthz_fields(WebContext*, JsonWrapper& json) {
   json.AddItem("outside_trend", trendName(out.trend));
   json.AddItem("outside_trend_age_s",
                out.haveRef ? static_cast<int>(now - out.refAt) : -1);
-  // The optional third reading. grid_topic "" means it is not configured, which
-  // is indistinguishable on screen from "configured but stale" — both are blank —
-  // so surface enough here to tell them apart. grid_value is kW AFTER grid_div,
-  // i.e. exactly what the screen shows, so a wrong divisor is visible here.
+  // Grid energy. grid_topic "" means not configured; the raw counters are
+  // reported so a swapped import/export field is visible (import should rise at
+  // night, export in sun), and grid_day/grid_day_base_kwh show where "today"
+  // started counting. grid_avg_kw / grid_today_kwh are ABSENT until computable,
+  // which is exactly when the screen shows "zz".
   json.AddItem("grid_topic", settings_.gridTopic);
   json.AddItem("grid_seen", gr.everSeen);
-  json.AddItem("grid_value", gr.tenths / 10.0);
   json.AddItem("grid_age_s", gr.everSeen ? static_cast<int>(now - gr.at) : -1);
-  json.AddItem("grid_fresh", gr.fresh(settings_.sensorStaleMin));
+  json.AddItem("grid_import_kwh", gr.importWh / 1000.0);
+  json.AddItem("grid_export_kwh", gr.exportWh / 1000.0);
+  json.AddItem("grid_samples", gr.count);
+  json.AddItem("grid_day", static_cast<int>(gr.dayKey));
+  json.AddItem("grid_day_base_kwh", gr.dayBaseNetWh / 1000.0);
+  {
+    const int staleS = settings_.sensorStaleMin * 60;
+    int t = 0;
+    if (gr.avgTenthsKw(now, settings_.minIntervalSec(), GridEnergy::kMinAvgS,
+                       staleS, &t)) {
+      json.AddItem("grid_avg_kw", t / 10.0);
+    }
+    if (gr.todayTenthsKwh(localDayKey(), now, staleS, &t)) {
+      json.AddItem("grid_today_kwh", t / 10.0);
+    }
+  }
 
   // The red "!" in the top-right corner. Reported right after the per-source ages
   // above, because those are the answer to "why is it on": whichever of

@@ -16,6 +16,7 @@
 
 #include "Canvas.h"
 #include "Gfx.h"
+#include "GridEnergy.h"
 #include "ScreenModel.h"
 #include "Tenths.h"
 #include "fonts.h"
@@ -185,9 +186,10 @@ void checkModelEquality() {
     m.outsideValid = true;
     m.outsideTrend = Trend::Falling;
     m.forecastValid = true;
-    snprintf(m.grid, sizeof m.grid, "+1.2");
-    snprintf(m.date, sizeof m.date, "Wed 5 Aug");
-    snprintf(m.rain, sizeof m.rain, "rain 10%%");
+    snprintf(m.gridAvg, sizeof m.gridAvg, "+1.8");
+    snprintf(m.gridToday, sizeof m.gridToday, "+12.4");
+    snprintf(m.date, sizeof m.date, "Wed 5");
+    snprintf(m.rain, sizeof m.rain, "10%%");
     return m;
   };
 
@@ -231,9 +233,10 @@ void checkModelEquality() {
       {"outsideTrend",[](ScreenModel& m) { m.outsideTrend = Trend::Steady; }},
       {"forecast",    [](ScreenModel& m) { snprintf(m.forecast, sizeof m.forecast, "Clear 6/17"); }},
       {"forecastValid",[](ScreenModel& m) { m.forecastValid = false; }},
-      {"grid",        [](ScreenModel& m) { snprintf(m.grid, sizeof m.grid, "+1.3"); }},
-      {"date",        [](ScreenModel& m) { snprintf(m.date, sizeof m.date, "Thu 6 Aug"); }},
-      {"rain",        [](ScreenModel& m) { snprintf(m.rain, sizeof m.rain, "rain 20%%"); }},
+      {"gridAvg",     [](ScreenModel& m) { snprintf(m.gridAvg, sizeof m.gridAvg, "+1.9"); }},
+      {"gridToday",   [](ScreenModel& m) { snprintf(m.gridToday, sizeof m.gridToday, "+12.5"); }},
+      {"date",        [](ScreenModel& m) { snprintf(m.date, sizeof m.date, "Thu 6"); }},
+      {"rain",        [](ScreenModel& m) { snprintf(m.rain, sizeof m.rain, "20%%"); }},
       {"alert",       [](ScreenModel& m) { m.alert = true; }},
       {"gridPending", [](ScreenModel& m) { m.gridPending = true; }},
   };
@@ -253,8 +256,68 @@ void checkModelEquality() {
          missed ? "*** FAILED ***" : "ok");
 }
 
+void checkGridEnergy() {
+  printf("\ngrid energy (GridEnergy.h)\n");
+  auto expect = [](const char* what, bool ok) {
+    if (!ok) ++fails;
+    printf("  %-44s %s\n", what, ok ? "ok" : "*** WRONG ***");
+  };
+  constexpr int kWin = 15 * 60, kStale = 30 * 60, kDay = 20261008;
+  int t = 0;
+
+  {
+    // Exporting a steady 1.5 kW: export counter +25 Wh a minute.
+    GridEnergy g;
+    expect("first sample sets the day baseline",
+           g.add(0, 8000000, 19000000, kDay));
+    for (int i = 1; i <= 4; ++i) g.add(i * 60, 8000000, 19000000 + 25 * i, kDay);
+    expect("no average under kMinAvgS (4 min)",
+           !g.avgTenthsKw(240, kWin, GridEnergy::kMinAvgS, kStale, &t));
+    g.add(300, 8000000, 19000125, kDay);
+    expect("+1.5 kW average at exactly kMinAvgS",
+           g.avgTenthsKw(300, kWin, GridEnergy::kMinAvgS, kStale, &t) && t == 15);
+    // Then 20 more minutes importing 0.6 kW (+10 Wh/min import, export flat).
+    for (int i = 1; i <= 20; ++i)
+      g.add(300 + i * 60, 8000000 + 10 * i, 19000125, kDay);
+    const int64_t now = 300 + 20 * 60;
+    expect("window uses only the last 15 min: -0.6 kW",
+           g.avgTenthsKw(now, kWin, GridEnergy::kMinAvgS, kStale, &t) && t == -6);
+    // Net since baseline: +125 Wh exported, -200 Wh imported = -75 Wh -> -0.1.
+    expect("today -75 Wh rounds away from zero to -0.1 kWh",
+           g.todayTenthsKwh(kDay, now, kStale, &t) && t == -1);
+    expect("no today figure against another day's baseline",
+           !g.todayTenthsKwh(kDay + 1, now, kStale, &t));
+    expect("stale data shows nothing",
+           !g.avgTenthsKw(now + kStale + 1, kWin, GridEnergy::kMinAvgS, kStale, &t) &&
+               !g.todayTenthsKwh(kDay, now + kStale + 1, kStale, &t));
+    expect("midnight rebases (add returns true)",
+           g.add(now + 60, 8000200, 19000125, kDay + 1) &&
+               g.todayTenthsKwh(kDay + 1, now + 60, kStale, &t) && t == 0);
+  }
+  {
+    GridEnergy g;
+    expect("unsynced clock (day 0) leaves no baseline",
+           !g.add(0, 100, 200, 0) && !g.todayTenthsKwh(kDay, 0, kStale, &t));
+    g.add(60, 100, 200, kDay);
+    g.restoreDay(kDay, -12345);  // as loaded from NVS after a reboot
+    // net now 100 Wh; since baseline -12345 that is +12445 Wh -> +12.4 kWh
+    expect("restored baseline survives a reboot: +12.4 kWh",
+           g.todayTenthsKwh(kDay, 60, kStale, &t) && t == 124);
+    expect("counter going backwards = meter reset: rebase",
+           g.add(120, 50, 200, kDay) && g.count == 1 &&
+               g.todayTenthsKwh(kDay, 120, kStale, &t) && t == 0);
+  }
+  {
+    GridEnergy g;
+    for (int i = 0; i <= 10; ++i) g.add(i * 60, 0, 1000000LL * i, kDay);
+    expect("absurd rate clamps rather than overflows",
+           g.avgTenthsKw(600, kWin, GridEnergy::kMinAvgS, kStale, &t) && t == 9999);
+  }
+}
+
 int main() {
   checkTenths();
+  checkGridEnergy();
   checkModelEquality();
 
   printf("font metrics\n");
@@ -278,26 +341,36 @@ int main() {
   // pathological — it truncates with ".." rather than overflowing.
   checkWidth("fc typical", epd::Font_Cond, "Clear 6/16", kFcMaxW);
   checkWidth("fc worst", epd::Font_Cond, "Heavy showers -9/45", kFcMaxW);
-  // The date line is shared: date left, labelled rain chance right-aligned.
-  const int rainW = epd::measureText(epd::Font_Cond, "rain 100%").advance;
-  printf("  %-20s %-22s %4d px (date budget becomes %d)\n", "rain widest",
-         "rain 100%", rainW, kFcMaxW - rainW - 8);
-  checkWidth("date widest", epd::Font_Cond, "Wed 28 May", kFcMaxW - rainW - 8);
-
-  // Grid power rides on the forecast line, unlabelled, so the forecast's budget
-  // shrinks by its width. "-88.8" is wider than any real household reading and is
-  // the sizing case; "+1.2kW" is reported to show what a unit would cost.
-  const int gridW = epd::measureText(epd::Font_Cond, "-88.8").advance;
+  // Grid figures form a right-hand column, unlabelled. "+88.8" is the sizing case
+  // for both lines: '+' is 5px wider than '-' in this font, and two integer digits
+  // cover any household figure for either the 15-minute kW or the day's kWh.
+  const int gridW = epd::measureText(epd::Font_Cond, "+88.8").advance;
   const int fcBudget = kFcMaxW - gridW - 8;
   printf("  %-20s %-22s %4d px (forecast budget becomes %d)\n", "grid widest",
-         "-88.8", gridW, fcBudget);
+         "+88.8", gridW, fcBudget);
   checkWidth("fc typical +grid", epd::Font_Cond, "Clear 6/16", fcBudget);
   checkWidth("fc 13ch +grid", epd::Font_Cond, "Partly cloudy 6/17", fcBudget);
-  checkWidth("fc worst +grid", epd::Font_Cond, "Heavy showers -9/45", fcBudget);
   checkWidth("fc failed +grid", epd::Font_Cond, "forecast unavailable", fcBudget);
-  const int unitW = epd::measureText(epd::Font_Cond, "+1.2kW").advance;
-  printf("  %-20s %-22s %4d px (would leave %d)\n", "grid WITH unit", "+1.2kW",
-         unitW, kFcMaxW - unitW - 8);
+  // Reported, not asserted: the pathological forecast is 1px over beside a
+  // two-digit export average, and only then — exporting >= 10 kW averaged over a
+  // quarter-hour. drawTextClipped truncates it with ".." rather than colliding.
+  {
+    const int wc = epd::measureText(epd::Font_Cond, "Heavy showers -9/45").advance;
+    const int g1 = epd::measureText(epd::Font_Cond, "+9.9").advance;
+    printf("  %-20s %-22s %4d px  fits beside +9.9 (%d): %s, beside +88.8 (%d): %s\n",
+           "fc worst +grid", "Heavy showers -9/45", wc, kFcMaxW - g1 - 8,
+           wc <= kFcMaxW - g1 - 8 ? "yes" : "NO", fcBudget,
+           wc <= fcBudget ? "yes" : "truncates");
+  }
+  // Date line: date left, then unlabelled rain chance, then today's grid kWh. The
+  // month and the word "rain" were dropped to make room — with both, this line
+  // was 24px over.
+  const int rainW = epd::measureText(epd::Font_Cond, "100%").advance;
+  const int dateBudget = kFcMaxW - gridW - 8 - rainW - 8;
+  printf("  %-20s %-22s %4d px (date budget becomes %d)\n", "rain widest",
+         "100%", rainW, dateBudget);
+  checkWidth("date widest", epd::Font_Cond, "Wed 28", dateBudget);
+  checkWidth("date widest day", epd::Font_Cond, "Thu 28", dateBudget);
 
   printf("\nvertical budgets (kH=%d, rule at y=76..78)\n", kH);
   checkVertical("inside label", epd::Font_Label, "IN", kInsideLabelBaseline, 0, 75);
@@ -305,7 +378,7 @@ int main() {
   checkVertical("outside label", epd::Font_Label, "OUT", kOutsideLabelBaseline, 0, 75);
   checkVertical("outside temp", epd::Font_Big, "-12.4", kOutsideTempBaseline, 0, 75);
   checkVertical("forecast desc", epd::Font_Cond, "Heavy drizzle 2/11", kFcBaseline, 79, 121);
-  checkVertical("rain desc", epd::Font_Cond, "rain 100%", kDateBaseline, 79, 121);
+  checkVertical("rain desc", epd::Font_Cond, "100%", kDateBaseline, 79, 121);
   checkVertical("date desc", epd::Font_Cond, "Wed 28 Sep", kDateBaseline, 79, 121);
 
   // Row separation: the inside block must not touch the outside block, and the
@@ -392,7 +465,7 @@ int main() {
   auto mk = [](const char* name, const char* inL, const char* inT, bool inV,
                Trend inTr, const char* outL, const char* outT, bool outV,
                Trend outTr, const char* fc, const char* date, const char* rain,
-               const char* grid) {
+               const char* gridAvg, const char* gridToday) {
     Case c{name, {}};
     snprintf(c.m.insideLabel, sizeof c.m.insideLabel, "%s", inL);
     snprintf(c.m.insideTemp, sizeof c.m.insideTemp, "%s", inT);
@@ -405,36 +478,37 @@ int main() {
     snprintf(c.m.forecast, sizeof c.m.forecast, "%s", fc);
     snprintf(c.m.date, sizeof c.m.date, "%s", date);
     snprintf(c.m.rain, sizeof c.m.rain, "%s", rain);
-    snprintf(c.m.grid, sizeof c.m.grid, "%s", grid);
+    snprintf(c.m.gridAvg, sizeof c.m.gridAvg, "%s", gridAvg);
+    snprintf(c.m.gridToday, sizeof c.m.gridToday, "%s", gridToday);
     return c;
   };
 
   cases.push_back(mk("normal", "IN", "21.4", true, Trend::Rising, "OUT", "7.8",
-                     true, Trend::Falling, "Partly cloudy 6/17", "Wed 5 Aug",
-                     "rain 10%", "+1.2"));
+                     true, Trend::Falling, "Partly cloudy 6/17", "Wed 5",
+                     "10%", "+1.8", "+12.4"));
   cases.push_back(mk("widest", "IN", "-12.4", true, Trend::Falling, "OUT",
                      "100.0", true, Trend::Rising, "Heavy showers -9/45",
-                     "Wed 28 May", "rain 100%", "-88.8"));
+                     "Wed 28", "100%", "+88.8", "-88.8"));
   cases.push_back(mk("no-mqtt", "IN", "--", false, Trend::Unknown, "OUT", "--",
-                     false, Trend::Unknown, "Clear 6/17", "", "", "zz"));
+                     false, Trend::Unknown, "Clear 6/17", "", "", "zz", "zz"));
   // Steady (measured flat) and Unknown (no history yet) are both blank, so this
   // case must render with an empty arrow column on both rows. Also the case where
   // the grid reading is absent — the forecast should get the full width back.
   cases.push_back(mk("steady", "IN", "19.0", true, Trend::Steady, "OUT", "3.2",
-                     true, Trend::Unknown, "Heavy drizzle 2/11", "Sat 12 Jul",
-                     "rain 90%", ""));
+                     true, Trend::Unknown, "Heavy drizzle 2/11", "Sat 12",
+                     "90%", "", ""));
   // Long labels squeeze the arrow column; the number must still be intact.
   cases.push_back(mk("longlabel", "LOUNGE", "19.0", true, Trend::Rising,
                      "OUTSIDE", "-12.4", true, Trend::Falling, "Clear 2/11",
-                     "Sat 12 Jul", "rain 90%", "-3.4"));
+                     "Sat 12", "90%", "-0.6", "-3.4"));
   // The alert on the WIDEST content, not on typical content: the mark has no
   // fallback (unlike the trend arrow, which measures and drops itself), so the case
   // that matters is the one where everything else is at maximum extent and the
   // corner is under the most pressure.
   {
     Case c = mk("alert", "IN", "-12.4", true, Trend::Falling, "OUT", "100.0", true,
-                Trend::Rising, "Heavy showers -9/45", "Wed 28 May", "rain 100%",
-                "-88.8");
+                Trend::Rising, "Heavy showers -9/45", "Wed 28", "100%",
+                "+88.8", "-88.8");
     c.m.alert = true;
     cases.push_back(c);
 

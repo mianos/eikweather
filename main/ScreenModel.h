@@ -42,25 +42,25 @@ struct ScreenModel {
   // once a day, so it costs one refresh per day. A time would cost one per minute.
   char forecast[48] = {};      // "Clear 6/16" — condition and today's low/high
   bool forecastValid = false;  // false => the fetch has never succeeded
-  // Third reading: net grid power in kW, signed ("+3.4" exporting, "-1.2"
-  // importing), right-aligned on the FORECAST line directly above the rain chance.
+  // Grid energy, both signed with "+" = net exporting: average kW over the last
+  // min_interval_min (right of the FORECAST line) and net kWh since midnight
+  // (right of the DATE line, beyond the rain chance). No units or labels — the
+  // column position is the key. See GridEnergy.h.
   //
-  // No unit, no label, no ring. It shares the tightest line on the screen:
-  // measured, the condition plus today's lo/hi is up to 188px of a 246px line, so
-  // the bare signed number is all that fits.
-  //
-  // "zz" while configured but waiting for a fresh value (none since boot, or gone
-  // stale); empty only when not configured, so the forecast keeps the full width.
-  char grid[16] = {};
-  // True while grid shows "zz". Holds back complete() so the boot-time fast path
-  // repaints the moment the first value lands instead of waiting min_interval_min.
+  // "zz" while configured but not yet computable; empty only when not configured,
+  // so both lines keep their full width.
+  char gridAvg[16] = {};
+  char gridToday[16] = {};
+  // True while either shows "zz". Holds back complete() so the boot-time fast
+  // path repaints the moment both are ready instead of waiting min_interval_min.
   bool gridPending = false;
   // 24, not 16: the compiler bounds %a and %b at 7 bytes each, so a 16-byte buffer
   // trips -Werror=format-truncation even though real output is ~10 chars.
-  char date[24] = {};      // "Wed 5 Aug", empty until SNTP has synced
-  // Drawn right-aligned on the date line and LABELLED. A bare "0%" tacked onto the
-  // forecast was unreadable — nothing said what it was a percentage of.
-  char rain[16] = {};      // "rain 0%", empty when the API returns no probability
+  char date[24] = {};      // "Wed 5", empty until SNTP has synced
+  // Drawn on the date line, left of gridToday. Unlabelled to make room for that:
+  // "rain " cost 39px. Its own line, away from the forecast's numbers, is what
+  // keeps a bare "%" readable — tacked onto the forecast it was not.
+  char rain[16] = {};      // "10%", empty when the API returns no probability
 
   // Some source that WAS working has gone quiet for alert_age_min — draw a red "!"
   // in the top-right corner. See the long note in Settings.h for exactly what

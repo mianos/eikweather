@@ -37,6 +37,10 @@ duration, BUSY timeouts, panel geometry and local time, plus:
 - `inside_topic` / `outside_topic` / `grid_topic` and `mqtt_messages`, enough to
   diagnose a wrong topic or field name without a serial cable. `grid_seen: false` with
   a non-empty `grid_topic` means the publisher is gone, not the display.
+- Grid: `grid_import_kwh` / `grid_export_kwh` (raw counters — import should rise at
+  night, export in sun; if not, the fields are swapped), `grid_samples`, `grid_day` /
+  `grid_day_base_kwh` (where "today" started counting), and `grid_avg_kw` /
+  `grid_today_kwh`, which are **absent** exactly when the screen shows `zz`.
 - `alert` and `alert_age_min`, immediately after the per-source ages that cause it.
 - `cpu_max_mhz` / `cpu_min_mhz` / `light_sleep` / `wifi_ps`, read back from the
   **driver** rather than from settings, so a `light_sleep: 1` setting against a build
@@ -55,8 +59,8 @@ duration, BUSY timeouts, panel geometry and local time, plus:
 | `mqtt_server` / `mqtt_port` | `mqtt.local` / `1883` | placeholder — point it at your broker |
 | `inside_topic` / `inside_field` / `inside_label` | `""` / `temperature` / `IN` | empty topic ⇒ shows `--` |
 | `outside_topic` / `outside_field` / `outside_label` | `""` / `temperature` / `OUT` | labels are short on purpose |
-| `grid_topic` / `grid_field` | `""` / `power` | optional net grid power; empty ⇒ not drawn at all |
-| `grid_div` | `-1000` | payload ÷ this = kW (+ exporting, − importing); magnitude `1` for a kW payload; positive if the meter already reports export as positive |
+| `grid_topic` | `""` | optional grid meter; empty ⇒ neither grid figure is drawn |
+| `grid_import_field` / `grid_export_field` | `forwardEnergy` / `reverseEnergy` | the meter's cumulative kWh counters in that topic's JSON |
 | `sensor_stale_min` | `30` | a reading older than this shows `--`; `0` disables |
 | `trend_win_min` / `trend_tenths` | `10` / `1` | rise/fall window, and deadband in tenths of a degree |
 | `alert_age_min` | `60` | red `!` once a working source goes quiet this long; `0` disables |
