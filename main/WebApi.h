@@ -1,6 +1,6 @@
 #pragma once
 #include "App.h"
-#include "WebServer.h"
+#include "WifiWebServer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -14,11 +14,11 @@
 //   GET  /screen.pbm   dump the framebuffer, separating "layout is wrong" from
 //                      "panel is wrong"
 //   GET/POST /config   the seven panel tunables, changeable without a reflash
-class WebApi : public WebServer {
+class WebApi : public WifiWebServer {
  public:
-  WebApi(WebContext* ctx, Settings& settings, App& app,
+  WebApi(WifiWebContext* ctx, Settings& settings, App& app,
                  TaskHandle_t displayTask)
-      : WebServer(ctx), settings_(settings), app_(app), displayTask_(displayTask) {}
+      : WifiWebServer(ctx), settings_(settings), app_(app), displayTask_(displayTask) {}
 
   esp_err_t start() override;
 

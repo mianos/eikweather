@@ -16,7 +16,7 @@ idf_component_register(
       nvsstoragemanager
       wifimanager
       settingsbase
-      webserver
+      webserver wifiwebserver
       jsonwrapper
       mqttwrapper
       espressif__mqtt

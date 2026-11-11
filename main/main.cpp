@@ -671,7 +671,7 @@ extern "C" void app_main(void) {
   sensors.setNotify(s_displayTask);
 
   if (settings.enableWeb) {
-    static WebContext webctx(&wifi);
+    static WifiWebContext webctx(&wifi);
     static WebApi web(&webctx, settings, app, s_displayTask);
     ESP_ERROR_CHECK(web.start());
   } else {

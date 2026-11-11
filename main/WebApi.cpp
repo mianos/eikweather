@@ -290,10 +290,10 @@ esp_err_t WebApi::config_reset_post_handler(httpd_req_t* req) {
   resp.AddItem("wifi_cleared", wipe_wifi);
   esp_err_t r = send_json(req, resp);
 
-  if (wipe_wifi && self->webContext && self->webContext->wifiManager) {
+  if (wipe_wifi && self->webContext && static_cast<WifiWebContext*>(self->webContext)->wifiManager) {
     ESP_LOGW(TAG, "clearing wifi credentials and rebooting");
     vTaskDelay(pdMS_TO_TICKS(500));
-    self->webContext->wifiManager->clear();
+    static_cast<WifiWebContext*>(self->webContext)->wifiManager->clear();
   }
   return r;
 }
